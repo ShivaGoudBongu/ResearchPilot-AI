@@ -108,8 +108,27 @@ Each card shows:
 - DOI, when OpenAlex has one
 - abstract, when OpenAlex has an inverted index
 - a source link, chosen in this order: landing page, PDF, open-access URL, DOI, OpenAlex work page
+- 
+<img width="960" height="504" alt="image" src="https://github.com/user-attachments/assets/eccbe11a-b76d-4d24-9340-99526dfd6981" />
 
 The search asks for at most 10 works, sorted by OpenAlex relevance for the topic text.
+**Testing:**
 
-<img width="960" height="504" alt="image" src="https://github.com/user-attachments/assets/eccbe11a-b76d-4d24-9340-99526dfd6981" />
+The project includes automated unit tests using `pytest`.
+
+Tests cover:
+- Abstract reconstruction from OpenAlex inverted indexes.
+- Paper metadata parsing.
+- HTTP errors, timeouts and connection failures.
+- Invalid JSON responses and empty search results.
+
+Run the tests using:
+
+<img width="960" height="504" alt="image" src="https://github.com/user-attachments/assets/a3230ae8-e9f0-475f-bf80-19f8c4dae93a" />
+**Latest verified result:** 14 tests passed.
+
+The tests use mocked API responses and do not require a live network connection.
+
+
+
 
