@@ -1,8 +1,16 @@
-"""ResearchPilot AI — Phase 1 paper discovery."""
+"""ResearchPilot AI — paper discovery and abstract analysis."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
+from researchpilot.analyzer import AnalysisError, analyze_paper
 from researchpilot.models import Paper
 from researchpilot.openalex import OpenAlexClient, OpenAlexError
 
-__all__ = ["OpenAlexClient", "OpenAlexError", "Paper", "__version__"]
+__all__ = [
+    "AnalysisError",
+    "OpenAlexClient",
+    "OpenAlexError",
+    "Paper",
+    "analyze_paper",
+    "__version__",
+]
