@@ -51,8 +51,19 @@ def test_app_starts_and_shows_the_search_page():
     app.run()
 
     assert not app.exception
-    assert app.title[0].value == "ResearchPilot AI"
-    assert app.button[0].label == "Search"
+    assert app.sidebar.title[0].value == "ResearchPilot AI"
+    sidebar_captions = "\n".join(item.value for item in app.sidebar.caption)
+    assert "AI-Powered Research Assistant" in sidebar_captions
+    assert "Built with Python, Streamlit, OpenAlex & Gemini AI." in sidebar_captions
+    assert app.sidebar.radio[0].value == "Discover Papers"
+    assert app.title[0].value == "Discover research. Understand faster."
+    assert "Search academic literature" in _markdown(app)
+    labels = [button.label for button in app.button]
+    assert labels[0] == "Search"
+    assert "Explainable AI" in labels
+    assert "Fraud Detection" in labels
+    assert "Machine Learning" in labels
+    assert "Large Language Models" in labels
 
 
 def test_saved_analysis_stays_on_its_paper_inside_the_expander():
@@ -81,14 +92,22 @@ def test_saved_analysis_stays_on_its_paper_inside_the_expander():
     visible = "\n".join(item.value for item in app.markdown)
     assert "Analysed paper" in visible
     assert "Paper without an abstract" in visible
-    assert any(
-        "Alpha objective only." in "\n".join(getattr(child, "value", "") or "" for child in expander)
-        for expander in app.expander
-    )
+    assert "Alpha objective only." not in visible
     assert len(app.link_button) == 2
     assert all(item.value == "View source" for item in app.link_button)
+    assert "Analysis saved. Open AI Paper Analysis to read it." in _captions(app)
+    analyse_buttons = [button for button in app.button if "Analyse" in button.label or "Retry" in button.label]
+    assert len(analyse_buttons) == 1
+    assert analyse_buttons[0].label == "Analyse with AI"
+    assert analyse_buttons[0].proto.disabled is True
+    assert [box.label for box in app.checkbox] == ["Select for comparison"]
+    assert "cannot be selected for comparison" in _captions(app)
 
-    captions = "\n".join(item.value for item in app.caption)
+    _goto(app, "AI Paper Analysis")
+    visible = _markdown(app)
+    captions = _captions(app)
+    assert "Analysed paper" in visible
+    assert "Paper without an abstract" not in visible
     assert "Alpha objective only." in visible
     assert "Alpha finding only." in visible
     assert "Author-reported limitations" in visible
@@ -96,13 +115,6 @@ def test_saved_analysis_stays_on_its_paper_inside_the_expander():
     assert "title and abstract only" in captions
     assert app.session_state["analyses"][analysed.analysis_key()]["text"] == ANALYSIS
     assert missing_abstract.analysis_key() not in app.session_state["analyses"]
-
-    analyse_buttons = [button for button in app.button if "Analyse" in button.label or "Retry" in button.label]
-    assert len(analyse_buttons) == 1
-    assert analyse_buttons[0].label == "Analyse with AI"
-    assert analyse_buttons[0].proto.disabled is True
-    assert [box.label for box in app.checkbox] == ["Select for comparison"]
-    assert "cannot be selected for comparison" in "\n".join(item.value for item in app.caption)
 
 
 def _flow(app: AppTest) -> list[tuple[str, str]]:
@@ -211,6 +223,12 @@ def _search_button(app: AppTest):
     return next(button for button in app.button if button.label == "Search")
 
 
+def _goto(app: AppTest, page: str) -> None:
+    app.sidebar.radio[0].set_value(page)
+    app.run()
+    assert not app.exception
+
+
 def _stored_comparison(papers: list[Paper], result: dict) -> dict:
     content_key = comparison_cache_key(papers)
     return {
@@ -255,22 +273,28 @@ def test_comparison_waits_for_the_button_and_follows_the_selection(monkeypatch):
     boxes = list(app.checkbox)
     assert len(boxes) == 4
     assert "cannot be selected for comparison" in _captions(app)
+    _goto(app, "Compare Research")
     assert _compare_button(app).proto.disabled is True
     assert calls["compare"] == 0
     assert "STALE SELECTION CLAIM" not in _markdown(app)
 
+    _goto(app, "Discover Papers")
+    boxes = list(app.checkbox)
     for box in boxes[:2]:
         box.check()
     app.run()
     assert calls["compare"] == 0
     assert "2 papers selected" in _captions(app)
+    _goto(app, "Compare Research")
     assert _compare_button(app).proto.disabled is True
     assert "Objective claim about the abstracts." not in _markdown(app)
 
+    _goto(app, "Discover Papers")
     boxes = list(app.checkbox)
     boxes[2].check().run()
     assert calls["compare"] == 0
     assert "3 papers selected" in _captions(app)
+    _goto(app, "Compare Research")
     assert _compare_button(app).proto.disabled is False
     assert "Objective claim about the abstracts." not in _markdown(app)
     assert "STALE SELECTION CLAIM" not in _markdown(app)
@@ -298,18 +322,22 @@ def test_comparison_waits_for_the_button_and_follows_the_selection(monkeypatch):
     assert "AI-inferred hypotheses from the selected abstracts" in captions
     assert "not independently verified" in captions
 
+    _goto(app, "Discover Papers")
     boxes = list(app.checkbox)
     boxes[0].uncheck()
     boxes[3].check()
     app.run()
+    _goto(app, "Compare Research")
     assert calls["compare"] == 1
     assert "Objective claim about the abstracts." not in _markdown(app)
     assert "STALE SELECTION CLAIM" in _markdown(app)
 
+    _goto(app, "Discover Papers")
     boxes = list(app.checkbox)
     boxes[0].check()
     boxes[3].uncheck()
     app.run()
+    _goto(app, "Compare Research")
     assert calls["compare"] == 1
     assert "Objective claim about the abstracts." in _markdown(app)
 
@@ -346,8 +374,11 @@ def test_new_search_clears_selection_and_drops_unrelated_comparisons(monkeypatch
         box.check()
     app.run()
     assert calls["compare"] == 0
+    _goto(app, "Compare Research")
     assert "Objective claim about the abstracts." in _markdown(app)
+    assert calls["compare"] == 0
 
+    _goto(app, "Discover Papers")
     app.text_input[0].set_value("graphs again")
     _search_button(app).click().run()
     assert not app.exception
@@ -357,13 +388,19 @@ def test_new_search_clears_selection_and_drops_unrelated_comparisons(monkeypatch
     assert all(not box.value for box in app.checkbox)
     assert comparison_cache_key(first) in app.session_state["comparisons"]
     assert app.session_state["analyses"][kept.analysis_key()]["text"] == ANALYSIS
+    _goto(app, "Compare Research")
+    assert "Objective claim about the abstracts." not in _markdown(app)
 
+    _goto(app, "Discover Papers")
     for box in app.checkbox:
         box.check()
     app.run()
     assert calls["compare"] == 0
+    _goto(app, "Compare Research")
     assert "Objective claim about the abstracts." in _markdown(app)
+    assert calls["compare"] == 0
 
+    _goto(app, "Discover Papers")
     replacement = [
         kept,
         _paper("https://openalex.org/W9", "Fresh paper", "A new abstract for the next search.", "https://example/9"),
@@ -380,7 +417,9 @@ def test_new_search_clears_selection_and_drops_unrelated_comparisons(monkeypatch
     assert "cannot be selected for comparison" in _captions(app)
     assert comparison_cache_key(first) not in app.session_state["comparisons"]
     assert app.session_state["analyses"][kept.analysis_key()]["text"] == ANALYSIS
+    _goto(app, "Compare Research")
     assert _compare_button(app).proto.disabled is True
+    assert "Objective claim about the abstracts." not in _markdown(app)
 
 
 def test_failed_comparison_can_be_retried_without_another_search(monkeypatch):
@@ -401,6 +440,7 @@ def test_failed_comparison_can_be_retried_without_another_search(monkeypatch):
     for box in app.checkbox:
         box.check()
     app.run()
+    _goto(app, "Compare Research")
     _compare_button(app).click().run()
 
     assert calls["compare"] == 1
@@ -462,6 +502,7 @@ def test_missing_abstract_is_not_compared_and_old_identifier_cache_is_ignored(mo
     for box in app.checkbox:
         box.check()
     app.run()
+    _goto(app, "Compare Research")
     assert "STALE IDENTIFIER CLAIM" not in _markdown(app)
 
     _compare_button(app).click().run()
@@ -482,3 +523,59 @@ def test_missing_abstract_is_not_compared_and_old_identifier_cache_is_ignored(mo
     assert calls["titles"] == [paper.title for paper in revised]
     assert calls["abstracts"] == [paper.abstract for paper in revised]
     assert missing.title not in calls["titles"]
+
+
+def test_navigation_preserves_results_selection_and_analyses():
+    paper = _paper(
+        "https://openalex.org/W1",
+        "Analysed paper",
+        "This abstract is long enough to analyse.",
+        "https://example/1",
+    )
+    app = _load(
+        [paper],
+        analyses={paper.analysis_key(): {"status": "ok", "text": ANALYSIS}},
+    )
+    app.checkbox[0].check().run()
+    assert app.checkbox[0].value is True
+
+    _goto(app, "AI Paper Analysis")
+    assert app.session_state["papers"][0].title == "Analysed paper"
+    assert app.session_state["analyses"][paper.analysis_key()]["text"] == ANALYSIS
+    assert "Alpha objective only." in _markdown(app)
+
+    _goto(app, "Compare Research")
+    assert "1 papers selected" in _captions(app)
+    assert app.session_state["analyses"][paper.analysis_key()]["text"] == ANALYSIS
+    assert "Alpha objective only." not in _markdown(app)
+
+    _goto(app, "About Project")
+    about = _markdown(app) + "\n" + "\n".join(item.value for item in app.info)
+    assert "https://github.com/ShivaGoudBongu/ResearchPilot-AI" in about
+    assert "Academic paper discovery." in about
+    assert "OpenAlex API" in about
+    assert "Google Gemini API" in about
+    assert "Pytest" in about
+    assert "not a replacement for reading the full scientific papers." in about
+    assert "accuracy" not in about.lower()
+    assert "%" not in about
+
+    _goto(app, "Discover Papers")
+    assert app.checkbox[0].value is True
+    assert app.session_state["papers"][0].title == "Analysed paper"
+    assert app.session_state["analyses"][paper.analysis_key()]["text"] == ANALYSIS
+    assert app.session_state["searched_topic"] == "graphs"
+
+
+def test_analysis_and_compare_pages_explain_when_nothing_is_ready():
+    app = AppTest.from_file(str(APP), default_timeout=30)
+    app.run()
+    assert not app.exception
+
+    _goto(app, "AI Paper Analysis")
+    assert any("Analyse with AI" in item.value for item in app.info)
+    assert "Alpha objective only." not in _markdown(app)
+
+    _goto(app, "Compare Research")
+    assert any("3 to 5" in item.value for item in app.info)
+    assert not any(button.label == "Compare Selected Papers" for button in app.button)
