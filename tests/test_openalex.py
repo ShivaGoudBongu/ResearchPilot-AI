@@ -54,6 +54,29 @@ def test_parse_work_fills_gaps_when_metadata_is_missing():
     assert paper.doi is None
     assert paper.abstract is None
     assert paper.source_url == "https://openalex.org/W9"
+    assert paper.venue is None
+
+
+def test_parse_work_reads_the_venue_only_when_openalex_provides_one():
+    with_source = parse_work(
+        {
+            "id": "https://openalex.org/W4",
+            "primary_location": {
+                "landing_page_url": "https://publisher.example/paper",
+                "source": {"display_name": "Nature <i>Machine</i> Intelligence"},
+            },
+        }
+    )
+    missing_source = parse_work(
+        {"id": "https://openalex.org/W5", "primary_location": {"pdf_url": "https://files.example/a.pdf"}}
+    )
+    named_without_text = parse_work(
+        {"id": "https://openalex.org/W6", "primary_location": {"source": {"display_name": "  "}}}
+    )
+
+    assert with_source.venue == "Nature Machine Intelligence"
+    assert missing_source.venue is None
+    assert named_without_text.venue is None
 
 
 def test_parse_work_falls_back_through_source_urls_and_bare_dois():

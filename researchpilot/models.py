@@ -9,6 +9,7 @@ class Paper:
 
     Missing OpenAlex fields stay None (or an empty author list) so the
     interface can say "Not available" instead of inventing values.
+    venue is the journal or source name only when OpenAlex provided one.
     """
 
     title: str
@@ -18,6 +19,7 @@ class Paper:
     abstract: str | None
     source_url: str | None
     openalex_id: str | None = None
+    venue: str | None = None
 
     def analysis_key(self) -> str:
         """Stable identity for a saved AI analysis.

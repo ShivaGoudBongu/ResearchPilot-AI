@@ -31,8 +31,9 @@ class OpenAlexClient:
     BASE_URL = "https://api.openalex.org/works"
     DEFAULT_TIMEOUT = 20.0
     MAX_RESULTS = 10
-    # Ask only for the fields Phase 1 displays. Smaller responses fail faster
-    # to parse and avoid depending on unrelated OpenAlex fields.
+    # Ask only for the fields the app displays. primary_location also carries
+    # the journal or venue name when OpenAlex has one. Volume, issue, and
+    # pages are not requested.
     SELECT_FIELDS = ",".join(
         [
             "id",
@@ -182,6 +183,7 @@ def parse_work(work: dict) -> Paper:
         abstract=abstract,
         source_url=source_url,
         openalex_id=openalex_id,
+        venue=_venue(work.get("primary_location")),
     )
 
 
@@ -244,6 +246,13 @@ def _normalize_doi(value: object) -> str | None:
     if text.startswith("10."):
         return f"https://doi.org/{text}"
     return None
+
+
+def _venue(location: object) -> str | None:
+    source = _nested(location, "source")
+    if not isinstance(source, dict):
+        return None
+    return _clean_display_text(source.get("display_name"))
 
 
 def _source_url(work: dict, doi: str | None) -> str | None:

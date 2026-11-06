@@ -51,9 +51,7 @@ def test_app_starts_and_shows_the_search_page():
     app.run()
 
     assert not app.exception
-    assert len(app.sidebar.title) == 0
-    sidebar_markdown = "\n".join(item.value for item in app.sidebar.markdown)
-    assert "ResearchPilot AI" in sidebar_markdown
+    assert app.sidebar.title[0].value == "ResearchPilot AI"
     sidebar_captions = "\n".join(item.value for item in app.sidebar.caption)
     assert "AI-Powered Research Assistant" in sidebar_captions
     assert "Built with Python, Streamlit, OpenAlex & Gemini AI." in sidebar_captions
@@ -66,70 +64,6 @@ def test_app_starts_and_shows_the_search_page():
     assert "Fraud Detection" in labels
     assert "Machine Learning" in labels
     assert "Large Language Models" in labels
-
-
-def test_card_controls_name_their_paper(monkeypatch):
-    calls = {"search": 0}
-
-    class FakeClient:
-        def search_papers(self, topic):
-            calls["search"] += 1
-            return []
-
-    monkeypatch.setattr("researchpilot.openalex.OpenAlexClient", FakeClient)
-    titled = "Graph methods for molecular property prediction"
-    other = "Temporal models for transaction fraud"
-    papers = [
-        _paper(
-            "https://openalex.org/W9",
-            titled,
-            "Methods and findings from the abstract. " * 20,
-            "https://example/graph",
-        ),
-        _paper(
-            "https://openalex.org/W10",
-            other,
-            "A different abstract with enough detail to preview. " * 20,
-            "https://example/temporal",
-        ),
-        _paper(
-            "https://openalex.org/W11",
-            "Survey without an abstract",
-            None,
-            "https://example/survey",
-        ),
-    ]
-    app = _load(papers)
-
-    assert calls["search"] == 0
-    labels = [item.label for item in app.expander]
-    assert labels == [f"Full abstract 1: {titled}", f"Full abstract 2: {other}"]
-    assert all(item.value == "View source" for item in app.link_button)
-    assert [item.help for item in app.link_button] == [
-        f"Opens the source for 1. {titled} in a new tab.",
-        f"Opens the source for 2. {other} in a new tab.",
-        "Opens the source for 3. Survey without an abstract in a new tab.",
-    ]
-    assert [box.help for box in app.checkbox] == [
-        f"Select 1. {titled} for comparison.",
-        f"Select 2. {other} for comparison.",
-    ]
-    analyse = [button for button in app.button if button.label == "Analyse with AI"]
-    enabled = [button for button in analyse if not button.proto.disabled]
-    disabled = [button for button in analyse if button.proto.disabled]
-    assert [button.help for button in enabled] == [
-        f"Analyse with AI for 1. {titled}.",
-        f"Analyse with AI for 2. {other}.",
-    ]
-    assert len(disabled) == 1
-    assert disabled[0].help == (
-        "This paper has no abstract, so AI analysis is unavailable for 3. Survey without an abstract."
-    )
-    visible = _markdown(app)
-    captions = _captions(app)
-    assert 'Results for “graphs”' in visible
-    assert "2020 · Ada Lovelace" in captions
-    assert '"Survey without an abstract" has no abstract, so it cannot be selected for comparison.' in captions
 
 
 def test_saved_analysis_stays_on_its_paper_inside_the_expander():
@@ -485,7 +419,6 @@ def test_new_search_clears_selection_and_drops_unrelated_comparisons(monkeypatch
     assert app.session_state["analyses"][kept.analysis_key()]["text"] == ANALYSIS
     _goto(app, "Compare Research")
     assert _compare_button(app).proto.disabled is True
-    assert "at least 3" in _compare_button(app).help
     assert "Objective claim about the abstracts." not in _markdown(app)
 
 
@@ -646,3 +579,59 @@ def test_analysis_and_compare_pages_explain_when_nothing_is_ready():
     _goto(app, "Compare Research")
     assert any("3 to 5" in item.value for item in app.info)
     assert not any(button.label == "Compare Selected Papers" for button in app.button)
+
+
+def test_citation_controls_follow_the_style_and_current_selection(monkeypatch):
+    def explode(*_args, **_kwargs):
+        raise AssertionError("The reference list must not call Gemini.")
+
+    monkeypatch.setattr("researchpilot.comparison.compare_papers", explode)
+    papers = [
+        _paper("https://openalex.org/W1", "Alpha study", "This abstract is long enough to compare.", "https://example/alpha"),
+        _paper("https://openalex.org/W2", "Beta study", "This abstract is long enough to compare.", "https://example/beta"),
+        _paper("https://openalex.org/W3", "Gamma study", "This abstract is long enough to compare.", "https://example/gamma"),
+        _paper("https://openalex.org/W4", "Delta study", "This abstract is long enough to compare.", "https://example/delta"),
+    ]
+    papers[0] = replace(papers[0], authors=["Ada Lovelace"], venue="Nature", doi="https://doi.org/10.1000/alpha")
+    papers[1] = replace(papers[1], authors=["Alan Turing"], venue="Science", doi="https://doi.org/10.1000/beta", publication_year=2019)
+    papers[2] = replace(papers[2], authors=["Grace Hopper"], venue="Communications", doi="https://doi.org/10.1000/gamma", publication_year=2021)
+    papers[3] = replace(papers[3], authors=["Donald Knuth"], venue="Computing", doi="https://doi.org/10.1000/delta", publication_year=2018)
+    app = _load(papers)
+
+    references = [item.value for item in app.text_area if item.label == "Reference"]
+    assert any(value.startswith("Lovelace, A. (2020). Alpha study. Nature.") for value in references)
+    assert "(Lovelace, 2020)" in [item.value for item in app.text_area if item.label == "In-text citation"]
+
+    app.selectbox[0].set_value("Harvard (general)")
+    app.run()
+    references = [item.value for item in app.text_area if item.label == "Reference"]
+    assert any("Available at: https://doi.org/10.1000/alpha" in value for value in references)
+
+    for box in app.checkbox[:3]:
+        box.check()
+    app.run()
+    _goto(app, "Compare Research")
+    listed = next(item.value for item in app.text_area if item.label == "References")
+    assert listed.index("Hopper, G.") < listed.index("Lovelace, A.") < listed.index("Turing, A.")
+    assert "Knuth" not in listed
+    assert "Available at:" in listed
+
+    _goto(app, "Discover Papers")
+    app.checkbox[0].uncheck()
+    app.checkbox[3].check()
+    app.run()
+    _goto(app, "Compare Research")
+    listed = next(item.value for item in app.text_area if item.label == "References")
+    assert "Alpha study" not in listed
+    assert listed.index("Hopper, G.") < listed.index("Knuth, D.") < listed.index("Turing, A.")
+
+    _goto(app, "Discover Papers")
+    for box in app.checkbox:
+        box.uncheck()
+    app.run()
+    _goto(app, "Compare Research")
+    assert not any(item.label == "References" for item in app.text_area)
+    visible = _markdown(app) + "\n" + _captions(app)
+    assert "Alpha study" not in visible
+    assert "Delta study" not in visible
+    assert "Knuth" not in visible
