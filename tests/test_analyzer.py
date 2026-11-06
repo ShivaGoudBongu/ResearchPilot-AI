@@ -110,17 +110,34 @@ def test_analyze_paper_rejects_an_empty_model_response(monkeypatch):
         analyze_paper("Title", "An abstract is present.")
 
 
-def test_analyze_paper_explains_rate_limits_without_api_details(monkeypatch):
+def test_analyze_paper_explains_quota_without_api_details(monkeypatch):
     def generate():
-        raise ClientError(429, {"error": {"status": "RESOURCE_EXHAUSTED", "message": "quota"}})
+        raise ClientError(
+            429,
+            {"error": {"status": "RESOURCE_EXHAUSTED", "message": "vendor-secret-detail"}},
+        )
+
+    _install_fake_client(monkeypatch, generate)
+
+    with pytest.raises(AnalysisError, match="quota is exhausted") as caught:
+        analyze_paper("Title", "An abstract is present.")
+
+    assert "vendor-secret-detail" not in str(caught.value)
+    assert "test-key" not in str(caught.value)
+    assert "rate limiting" not in str(caught.value)
+
+
+def test_analyze_paper_explains_rate_limits_separately_from_quota(monkeypatch):
+    def generate():
+        raise ClientError(429, {"error": {"status": "TOO_MANY_REQUESTS", "message": "vendor-secret-detail"}})
 
     _install_fake_client(monkeypatch, generate)
 
     with pytest.raises(AnalysisError, match="rate limiting") as caught:
         analyze_paper("Title", "An abstract is present.")
 
-    assert "quota" not in str(caught.value)
-    assert "test-key" not in str(caught.value)
+    assert "quota is exhausted" not in str(caught.value)
+    assert "vendor-secret-detail" not in str(caught.value)
 
 
 def test_analyze_paper_explains_server_errors(monkeypatch):
@@ -129,8 +146,13 @@ def test_analyze_paper_explains_server_errors(monkeypatch):
 
     _install_fake_client(monkeypatch, generate)
 
-    with pytest.raises(AnalysisError, match="temporarily unavailable"):
+    with pytest.raises(AnalysisError, match="server error") as caught:
         analyze_paper("Title", "An abstract is present.")
+
+    message = str(caught.value)
+    assert "temporarily unavailable" in message
+    assert "not an authentication or quota failure" in message
+    assert "down" not in message
 
 
 def test_analyze_paper_explains_a_rejected_api_key(monkeypatch):
@@ -143,6 +165,37 @@ def test_analyze_paper_explains_a_rejected_api_key(monkeypatch):
         analyze_paper("Title", "An abstract is present.")
 
     assert "test-key" not in str(caught.value)
+    assert "bad key" not in str(caught.value)
+
+
+def test_analyze_paper_explains_model_and_request_errors(monkeypatch):
+    def missing_model():
+        raise ClientError(404, {"error": {"status": "NOT_FOUND", "message": "model missing"}})
+
+    _install_fake_client(monkeypatch, missing_model)
+    with pytest.raises(AnalysisError, match="could not find the configured model") as caught:
+        analyze_paper("Title", "An abstract is present.")
+    assert "model missing" not in str(caught.value)
+
+    def invalid_request():
+        raise ClientError(400, {"error": {"status": "INVALID_ARGUMENT", "message": "prompt too large"}})
+
+    _install_fake_client(monkeypatch, invalid_request)
+    with pytest.raises(AnalysisError, match="invalid or too large") as caught:
+        analyze_paper("Title", "An abstract is present.")
+    assert "prompt too large" not in str(caught.value)
+
+
+def test_analyze_paper_explains_a_timeout(monkeypatch):
+    def generate():
+        raise TimeoutError("timed out talking to vendor")
+
+    _install_fake_client(monkeypatch, generate)
+
+    with pytest.raises(AnalysisError, match="timed out") as caught:
+        analyze_paper("Title", "An abstract is present.")
+
+    assert "vendor" not in str(caught.value)
 
 
 def test_analysis_key_prefers_openalex_id_over_position():

@@ -128,10 +128,41 @@ def papers_from_payload(payload: object) -> list[Paper]:
         raise OpenAlexError("OpenAlex returned an unexpected response.")
 
     papers: list[Paper] = []
+    seen_openalex: set[str] = set()
+    seen_dois: set[str] = set()
     for item in results:
-        if isinstance(item, dict):
-            papers.append(parse_work(item))
+        if not isinstance(item, dict):
+            continue
+        paper = parse_work(item)
+        openalex_id = _identity(paper.openalex_id)
+        doi = _doi_identity(paper.doi)
+        if openalex_id and openalex_id in seen_openalex:
+            continue
+        if doi and doi in seen_dois:
+            continue
+        if openalex_id:
+            seen_openalex.add(openalex_id)
+        if doi:
+            seen_dois.add(doi)
+        papers.append(paper)
     return papers
+
+
+def _identity(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower().rstrip("/")
+    return text or None
+
+
+def _doi_identity(value: str | None) -> str | None:
+    text = _identity(value)
+    if text is None:
+        return None
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :].strip().rstrip("/")
+    return text or None
 
 
 def parse_work(work: dict) -> Paper:

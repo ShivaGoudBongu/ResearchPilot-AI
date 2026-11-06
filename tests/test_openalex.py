@@ -3,7 +3,7 @@
 import requests
 
 from researchpilot.models import Paper
-from researchpilot.openalex import OpenAlexClient, OpenAlexError, parse_work
+from researchpilot.openalex import OpenAlexClient, OpenAlexError, papers_from_payload, parse_work
 
 
 FULL_WORK = {
@@ -239,3 +239,48 @@ def test_search_treats_a_missing_results_list_as_empty(monkeypatch):
 
     monkeypatch.setattr(client._session, "get", lambda *args, **kwargs: NoResults())
     assert client.search_papers("very obscure phrase") == []
+
+
+def test_same_title_and_authors_with_different_identifiers_are_kept():
+    authors = [{"author": {"display_name": "Ada Lovelace"}}]
+    papers = papers_from_payload(
+        {
+            "results": [
+                {
+                    "id": "https://openalex.org/W1",
+                    "doi": "https://doi.org/10.1000/a",
+                    "title": "AI Agents vs. Agentic AI",
+                    "publication_year": 2024,
+                    "authorships": authors,
+                },
+                {
+                    "id": "https://openalex.org/W2",
+                    "doi": "https://doi.org/10.1000/b",
+                    "title": "AI Agents vs. Agentic AI",
+                    "publication_year": 2025,
+                    "authorships": authors,
+                },
+            ]
+        }
+    )
+
+    assert [paper.openalex_id for paper in papers] == [
+        "https://openalex.org/W1",
+        "https://openalex.org/W2",
+    ]
+    assert [paper.publication_year for paper in papers] == [2024, 2025]
+
+
+def test_duplicate_openalex_id_or_doi_is_kept_once():
+    papers = papers_from_payload(
+        {
+            "results": [
+                {"id": "https://openalex.org/W1", "doi": "https://doi.org/10.1000/same", "title": "First listing"},
+                {"id": "https://openalex.org/W1", "doi": "https://doi.org/10.1000/same", "title": "Repeated work"},
+                {"id": "https://openalex.org/W9", "doi": "https://doi.org/10.1000/same", "title": "Same DOI, other record"},
+                {"id": "https://openalex.org/W3", "doi": "https://doi.org/10.1000/other", "title": "Distinct paper"},
+            ]
+        }
+    )
+
+    assert [paper.title for paper in papers] == ["First listing", "Distinct paper"]

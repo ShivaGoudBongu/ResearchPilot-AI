@@ -7,6 +7,7 @@ The key is never written into source code or included in error messages.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 
@@ -19,6 +20,7 @@ from researchpilot.models import Paper
 load_dotenv()
 
 MODEL_NAME = "gemini-3.5-flash-lite"
+logger = logging.getLogger(__name__)
 
 DISCLAIMER = (
     "AI-generated analysis based on the title and abstract only. "
@@ -43,33 +45,52 @@ def analyze_paper(title: str, abstract: str) -> str:
         AnalysisError: the Gemini request failed, including rate limits and
             temporary server errors.
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or not api_key.strip():
-        raise ValueError(
-            "GEMINI_API_KEY is missing. Add it to the .env file and restart the app."
-        )
+    require_api_key()
 
     abstract_text = abstract.strip() if isinstance(abstract, str) else ""
     if not abstract_text:
         raise ValueError("This paper has no abstract to analyse.")
 
     title_text = title.strip() if isinstance(title, str) and title.strip() else "Untitled"
-    client = genai.Client(api_key=api_key)
+    return generate_text(_prompt(title_text, abstract_text))
 
+
+def require_api_key() -> str:
+    """Return the Gemini API key, or raise ValueError if it is missing."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key or not api_key.strip():
+        raise ValueError(
+            "GEMINI_API_KEY is missing. Add it to the .env file and restart the app."
+        )
+    return api_key
+
+
+def generate_text(contents: str) -> str:
+    """Send one prompt to Gemini and return the response text.
+
+    Raises:
+        ValueError: the API key is missing or the model returned no text.
+        AnalysisError: the request failed, including rate limits and server errors.
+    """
+    client = genai.Client(api_key=require_api_key())
     try:
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=_prompt(title_text, abstract_text),
+            contents=contents,
         )
     except APIError as exc:
+        logger.warning("Gemini request failed with code=%s status=%s", exc.code, exc.status)
         raise AnalysisError(_message_for_api_error(exc)) from exc
+    except TimeoutError as exc:
+        raise AnalysisError("The Gemini request timed out. Please try again.") from exc
     except Exception as exc:
+        if exc.__class__.__name__ in {"TimeoutException", "ConnectTimeout", "ReadTimeout"}:
+            raise AnalysisError("The Gemini request timed out. Please try again.") from exc
         raise AnalysisError("The analysis request failed. Please try again.") from exc
 
     text = getattr(response, "text", None)
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Gemini returned an empty response.")
-
     return text.strip()
 
 
@@ -191,14 +212,41 @@ Rules:
 
 
 def _message_for_api_error(exc: APIError) -> str:
-    code = exc.code
-    if code == 429:
-        return "Gemini is rate limiting requests. Wait a moment and try again."
-    if code in (401, 403):
+    """Return a safe message. Provider text and the API key are never included."""
+    code = exc.code if isinstance(exc.code, int) else None
+    status = exc.status.upper() if isinstance(exc.status, str) else ""
+
+    if code in (401, 403) or status in {"UNAUTHENTICATED", "PERMISSION_DENIED"}:
         return (
             "Gemini rejected the API key. Check GEMINI_API_KEY in the .env file "
             "and restart the app."
         )
-    if isinstance(exc, ServerError) or (isinstance(code, int) and 500 <= code <= 599):
-        return "Gemini is temporarily unavailable. Please try again later."
-    return "Gemini could not analyse this abstract. Please try again."
+    if status == "RESOURCE_EXHAUSTED":
+        return (
+            "Gemini quota is exhausted. Wait before trying again. "
+            "This is not an authentication failure."
+        )
+    if code == 429:
+        return (
+            "Gemini is rate limiting requests. Wait a moment and try again. "
+            "This is not an authentication or quota failure."
+        )
+    if code == 404 or status == "NOT_FOUND":
+        return (
+            "Gemini could not find the configured model. "
+            "This is not an authentication or quota failure."
+        )
+    if code in (400, 413) or status in {"INVALID_ARGUMENT", "FAILED_PRECONDITION"}:
+        return (
+            "Gemini rejected the request as invalid or too large. "
+            "Try fewer papers, then try again. "
+            "This is not an authentication or quota failure."
+        )
+    if code == 408 or status in {"DEADLINE_EXCEEDED", "CANCELLED"}:
+        return "The Gemini request timed out. Please try again."
+    if isinstance(exc, ServerError) or (code is not None and 500 <= code <= 599):
+        return (
+            "Gemini is temporarily unavailable because of a server error. "
+            "This is not an authentication or quota failure. Please try again later."
+        )
+    return "The Gemini request failed. Please try again."
