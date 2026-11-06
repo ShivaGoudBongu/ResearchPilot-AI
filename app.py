@@ -1,5 +1,7 @@
 """Streamlit interface for paper discovery, analysis, and comparison."""
 
+import html
+
 import streamlit as st
 
 from researchpilot.analyzer import (
@@ -36,7 +38,7 @@ SUGGESTIONS = (
     "Large Language Models",
 )
 GITHUB_URL = "https://github.com/ShivaGoudBongu/ResearchPilot-AI"
-PREVIEW_LENGTH = 420
+PREVIEW_LENGTH = 320
 
 st.set_page_config(
     page_title="ResearchPilot AI",
@@ -75,21 +77,36 @@ def _has_abstract(paper: Paper) -> bool:
     return isinstance(paper.abstract, str) and bool(paper.abstract.strip())
 
 
-def _summary_label(index: int, paper: Paper) -> str:
-    year = _display(paper.publication_year)
-    authors = _author_summary(paper.authors)
-    return f"**{index}. {paper.title}** — {year} · {authors}"
+def _paper_title(paper: Paper) -> str:
+    if isinstance(paper.title, str) and paper.title.strip():
+        return paper.title.strip()
+    return "Untitled"
 
 
-def _mark_card() -> None:
-    st.markdown('<div class="rp-card"></div>', unsafe_allow_html=True)
+def _short_label(title: str, limit: int = 72) -> str:
+    text = " ".join(title.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
 
 
-def _preview(abstract: str) -> str:
+def _paper_heading(index: int, paper: Paper) -> str:
+    title = _paper_title(paper)
+    st.markdown(f"**{index}. {title}**")
+    st.caption(f"{_display(paper.publication_year)} · {_author_summary(paper.authors)}")
+    return title
+
+
+def _mark_card(missing: bool = False) -> None:
+    kind = "rp-card rp-missing" if missing else "rp-card"
+    st.markdown(f'<div class="{kind}"></div>', unsafe_allow_html=True)
+
+
+def _preview_text(abstract: str) -> tuple[str, bool]:
     text = " ".join(abstract.split())
     if len(text) <= PREVIEW_LENGTH:
-        return text
-    return text[:PREVIEW_LENGTH].rstrip() + "…"
+        return text, False
+    return text[:PREVIEW_LENGTH].rstrip() + "…", True
 
 
 def _render_analysis_text(text: str) -> None:
@@ -271,55 +288,83 @@ def _render_comparison(selected: list[Paper]) -> None:
                 st.caption("AI-generated from the selected abstracts.")
 
 
-def _render_source(paper: Paper) -> None:
-    if paper.doi:
-        label = _doi_label(paper.doi)
-        st.markdown(f"**DOI:** [{label}]({paper.doi})")
-    else:
-        st.markdown("**DOI:** Not available")
+def _render_doi(paper: Paper) -> None:
+    if not paper.doi:
+        return
+    label = html.escape(_doi_label(paper.doi))
+    href = html.escape(paper.doi, quote=True)
+    st.markdown(
+        f'<p class="rp-meta">DOI: <a href="{href}">{label}</a></p>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_source_action(paper: Paper, index: int, title: str) -> None:
     if paper.source_url:
         st.link_button(
             "View source",
             paper.source_url,
-            help="Opens the article in a new tab.",
+            help=f"Opens the source for {index}. {title} in a new tab.",
+            use_container_width=True,
         )
-    else:
-        st.markdown("**Source URL:** Not available")
+        return
+    st.caption(f"No source link is available for {index}. {title}.")
 
 
 def _render_paper(index: int, paper: Paper) -> None:
     key = paper.analysis_key()
-    title = paper.title.strip() if isinstance(paper.title, str) and paper.title.strip() else "Untitled"
     with st.container(border=True):
-        _mark_card()
-        st.markdown(_summary_label(index, paper))
         if _has_abstract(paper):
+            _mark_card()
+            title = _paper_heading(index, paper)
+            _render_doi(paper)
+            abstract = paper.abstract or ""
+            preview, truncated = _preview_text(abstract)
+            st.markdown(
+                f'<p class="rp-preview">{html.escape(preview)}</p>',
+                unsafe_allow_html=True,
+            )
+            if truncated:
+                with st.expander(f"Full abstract {index}: {_short_label(title)}"):
+                    st.write(abstract)
+            st.markdown('<hr class="rp-actions">', unsafe_allow_html=True)
             _restore_selection(index, paper)
             st.checkbox(
                 "Select for comparison",
                 key=_selection_widget_key(index, paper),
+                help=f"Select {index}. {title} for comparison.",
             )
-            _render_source(paper)
-            st.markdown("**Abstract**")
-            abstract = paper.abstract or ""
-            preview = _preview(abstract)
-            st.write(preview)
-            if preview != " ".join(abstract.split()):
-                with st.expander("Full abstract"):
-                    st.write(abstract)
-            _render_analysis_action(index, paper, key)
+            _render_source_action(paper, index, title)
+            _render_analysis_action(index, paper, key, title)
         else:
+            _mark_card(missing=True)
+            title = _paper_heading(index, paper)
             st.caption(f'"{title}" has no abstract, so it cannot be selected for comparison.')
-            _render_source(paper)
-            st.button("Analyse with AI", key=f"analyse-{index}-{key}", disabled=True)
+            _render_doi(paper)
+            st.markdown('<hr class="rp-actions">', unsafe_allow_html=True)
+            _render_source_action(paper, index, title)
+            st.button(
+                "Analyse with AI",
+                key=f"analyse-{index}-{key}",
+                disabled=True,
+                help=(
+                    f"This paper has no abstract, so AI analysis is unavailable for {index}. {title}."
+                ),
+                use_container_width=True,
+            )
             st.caption("This paper has no abstract, so AI analysis is unavailable.")
 
 
-def _render_analysis_action(index: int, paper: Paper, key: str) -> None:
+def _render_analysis_action(index: int, paper: Paper, key: str, title: str) -> None:
     stored = st.session_state.analyses.get(key)
     if analysis_needs_request(stored):
         label = "Retry analysis" if stored and stored.get("status") == "error" else "Analyse with AI"
-        if st.button(label, key=f"analyse-{index}-{key}"):
+        if st.button(
+            label,
+            key=f"analyse-{index}-{key}",
+            help=f"{label} for {index}. {title}.",
+            use_container_width=True,
+        ):
             with st.spinner("Analysing the abstract with Gemini..."):
                 _analyse(paper)
             stored = st.session_state.analyses.get(key)
@@ -349,15 +394,15 @@ def _render_search_form() -> str | None:
         "and compare scientific studies.</p>",
         unsafe_allow_html=True,
     )
-    with st.container(border=True):
-        _mark_card()
-        with st.form("search_form"):
-            topic = st.text_input(
-                "Research topic",
-                placeholder="e.g. graph neural networks for drug discovery",
-                key="topic_query",
-            )
-            submitted = st.form_submit_button("Search", type="primary")
+    with st.form("search_form"):
+        topic = st.text_input(
+            "Research topic",
+            placeholder="e.g. graph neural networks for drug discovery",
+            key="topic_query",
+        )
+        submitted = st.form_submit_button("Search", type="primary", use_container_width=True)
+    with st.container():
+        st.markdown('<div class="rp-examples"></div>', unsafe_allow_html=True)
         st.caption("Examples")
         columns = st.columns(2)
         for index, label in enumerate(SUGGESTIONS):
@@ -385,7 +430,8 @@ def _render_discover(papers: list[Paper] | None) -> None:
 
     count = len(papers)
     noun = "paper" if count == 1 else "papers"
-    st.success(f'{count} {noun} found for "{st.session_state.searched_topic}".')
+    st.markdown(f'**Results for “{st.session_state.searched_topic}”**')
+    st.caption(f"{count} {noun}")
     for index, paper in enumerate(papers, start=1):
         _render_paper(index, paper)
     selected = _selected_papers(papers)
@@ -415,11 +461,9 @@ def _render_analysis_page(papers: list[Paper] | None) -> None:
         shown = True
         with st.container(border=True):
             _mark_card()
-            st.markdown(_summary_label(index, paper))
-            authors = ", ".join(paper.authors) if paper.authors else None
-            st.markdown(f"**Authors:** {_display(authors)}")
-            st.markdown(f"**Year:** {_display(paper.publication_year)}")
-            _render_source(paper)
+            title = _paper_heading(index, paper)
+            _render_doi(paper)
+            _render_source_action(paper, index, title)
             _render_stored_analysis(stored)
     if not shown:
         st.info(
@@ -452,11 +496,13 @@ def _render_compare_page(papers: list[Paper] | None) -> None:
     else:
         st.caption("No papers are selected yet. Select them on Discover Papers.")
 
+    reasons = selection_errors(selected)
     if st.button(
         "Compare Selected Papers",
         key="compare-selected",
         type="primary",
-        disabled=bool(selection_errors(selected)),
+        disabled=bool(reasons),
+        help=reasons[0] if reasons else "Compare the selected paper abstracts.",
     ):
         _compare(selected)
     _render_comparison(selected)
@@ -524,9 +570,10 @@ def _search(topic: str) -> None:
 
 def _render_sidebar() -> str:
     with st.sidebar:
-        st.title("ResearchPilot AI")
+        st.markdown('<p class="rp-brand">ResearchPilot AI</p>', unsafe_allow_html=True)
         st.caption("AI-Powered Research Assistant")
         page = st.radio("Sections", PAGES, key="nav_section")
+        st.markdown('<div class="rp-side-foot"></div>', unsafe_allow_html=True)
         st.caption("Built with Python, Streamlit, OpenAlex & Gemini AI.")
     return page
 
