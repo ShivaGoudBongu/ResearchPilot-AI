@@ -168,7 +168,7 @@ Tests cover:
 - Gemini analysis with a mocked client, including a missing API key, rate limits, and temporary server errors.
 - Keeping an analysis attached to the correct paper after the result order changes.
 
-Run the tests using:
+Run the tests using: python -m pytest -v
 
 <img width="960" height="504" alt="image" src="https://github.com/user-attachments/assets/a3230ae8-e9f0-475f-bf80-19f8c4dae93a" />
 
