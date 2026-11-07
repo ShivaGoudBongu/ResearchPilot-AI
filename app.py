@@ -13,6 +13,14 @@ from researchpilot.analyzer import (
     retain_analyses,
 )
 from researchpilot.citations import format_citation, format_reference_list, style_from_label
+from researchpilot.export import (
+    COMPARISON_REPORT_FILENAME,
+    DOCX_MIME,
+    PAPER_REPORT_FILENAME,
+    ExportError,
+    comparison_docx,
+    paper_analysis_docx,
+)
 from researchpilot.comparison import (
     PRESENTATION_DISCLAIMER,
     ComparisonError,
@@ -225,7 +233,47 @@ def _compare(selected: list[Paper]) -> None:
     }
 
 
-def _render_comparison(selected: list[Paper]) -> None:
+def _render_analysis_download(paper: Paper, stored: dict, style: str) -> None:
+    if stored.get("status") != "ok":
+        return
+    text = stored.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return
+    try:
+        payload = paper_analysis_docx(paper, text, style)
+    except ExportError:
+        st.caption("A Word report is not available because this analysis is missing the expected sections.")
+        return
+    digest = hashlib.sha256(f"{style}|{text}".encode("utf-8")).hexdigest()[:12]
+    st.download_button(
+        "Download Word Report",
+        data=payload,
+        file_name=PAPER_REPORT_FILENAME,
+        mime=DOCX_MIME,
+        key=f"download-analysis-{digest}-{paper.analysis_key()}",
+        help="Downloads the saved analysis as a Word document. This does not call Gemini.",
+    )
+
+
+def _render_comparison_download(selected: list[Paper], cached: dict, style: str) -> None:
+    try:
+        payload = comparison_docx(selected, cached, style)
+    except (ExportError, ComparisonError, SelectionError):
+        return
+    digest = hashlib.sha256(
+        f"{style}|{cached.get('content_key')}".encode("utf-8")
+    ).hexdigest()[:12]
+    st.download_button(
+        "Download Word Report",
+        data=payload,
+        file_name=COMPARISON_REPORT_FILENAME,
+        mime=DOCX_MIME,
+        key=f"download-comparison-{digest}",
+        help="Downloads the saved comparison as a Word document. This does not call Gemini.",
+    )
+
+
+def _render_comparison(selected: list[Paper], style: str) -> None:
     found = _cached_comparison(selected)
     if found is None:
         return
@@ -272,6 +320,7 @@ def _render_comparison(selected: list[Paper]) -> None:
                 )
             else:
                 st.caption("AI-generated from the selected abstracts.")
+    _render_comparison_download(selected, cached, style)
 
 
 def _render_source(paper: Paper) -> None:
@@ -459,6 +508,15 @@ def _render_discover(papers: list[Paper] | None) -> None:
     st.caption("Open Compare Research when 3 to 5 papers are selected.")
 
 
+def _analysis_can_export(stored: object) -> bool:
+    return (
+        isinstance(stored, dict)
+        and stored.get("status") == "ok"
+        and isinstance(stored.get("text"), str)
+        and bool(stored.get("text").strip())
+    )
+
+
 def _render_analysis_page(papers: list[Paper] | None) -> None:
     st.title("AI Paper Analysis")
     st.markdown(
@@ -474,6 +532,8 @@ def _render_analysis_page(papers: list[Paper] | None) -> None:
         return
 
     shown = False
+    exportable = any(_analysis_can_export(st.session_state.analyses.get(paper.analysis_key())) for paper in papers)
+    style = _citation_style() if exportable else style_from_label("APA 7")
     for index, paper in enumerate(papers, start=1):
         stored = st.session_state.analyses.get(paper.analysis_key())
         if not isinstance(stored, dict):
@@ -487,6 +547,7 @@ def _render_analysis_page(papers: list[Paper] | None) -> None:
             st.markdown(f"**Year:** {_display(paper.publication_year)}")
             _render_source(paper)
             _render_stored_analysis(stored)
+            _render_analysis_download(paper, stored, style)
     if not shown:
         st.info(
             "No analysis yet. On Discover Papers, choose Analyse with AI "
@@ -528,7 +589,7 @@ def _render_compare_page(papers: list[Paper] | None) -> None:
         disabled=bool(selection_errors(selected)),
     ):
         _compare(selected)
-    _render_comparison(selected)
+    _render_comparison(selected, style)
 
 
 def _render_about() -> None:

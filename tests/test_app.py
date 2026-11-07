@@ -581,6 +581,68 @@ def test_analysis_and_compare_pages_explain_when_nothing_is_ready():
     assert not any(button.label == "Compare Selected Papers" for button in app.button)
 
 
+def test_word_download_follows_saved_results_and_does_not_call_gemini(monkeypatch):
+    def explode(*_args, **_kwargs):
+        raise AssertionError("Word export must not call Gemini.")
+
+    monkeypatch.setattr("researchpilot.analyzer.generate_text", explode)
+    monkeypatch.setattr("researchpilot.comparison.compare_papers", explode)
+    paper = _paper(
+        "https://openalex.org/W1",
+        "Analysed paper",
+        "This abstract is long enough to analyse.",
+        "https://example/1",
+    )
+    untouched = _paper(
+        "https://openalex.org/W2",
+        "Unanalysed paper",
+        "This abstract is long enough to analyse.",
+        "https://example/2",
+    )
+    app = _load(
+        [paper, untouched],
+        analyses={paper.analysis_key(): {"status": "ok", "text": ANALYSIS}},
+    )
+    _goto(app, "AI Paper Analysis")
+    downloads = list(app.download_button)
+    assert len(downloads) == 1
+    assert downloads[0].label == "Download Word Report"
+    assert "does not call Gemini" in downloads[0].help
+
+    broken = _load(
+        [paper],
+        analyses={paper.analysis_key(): {"status": "ok", "text": "not a structured analysis"}},
+    )
+    _goto(broken, "AI Paper Analysis")
+    assert list(broken.download_button) == []
+    assert "missing the expected sections" in _captions(broken)
+
+    selected = [
+        _paper(
+            f"https://openalex.org/W{index}",
+            f"Paper {index}",
+            f"Abstract {index} is long enough to compare.",
+            f"https://example/{index}",
+        )
+        for index in range(1, 4)
+    ]
+    result = _comparison_payload(selected)
+    compared = _load(selected, comparisons=_stored_comparison(selected, result))
+    for box in compared.checkbox:
+        box.check()
+    compared.run()
+    _goto(compared, "Compare Research")
+    assert len(list(compared.download_button)) == 1
+    assert compared.download_button[0].label == "Download Word Report"
+
+    revised = [replace(selected[0], abstract="A rewritten abstract with different evidence."), *selected[1:]]
+    compared.session_state["papers"] = revised
+    compared.run()
+    _goto(compared, "Compare Research")
+    assert list(compared.download_button) == []
+    assert "Objective claim about the abstracts." not in _markdown(compared)
+
+
 def test_citation_controls_follow_the_style_and_current_selection(monkeypatch):
     def explode(*_args, **_kwargs):
         raise AssertionError("The reference list must not call Gemini.")
