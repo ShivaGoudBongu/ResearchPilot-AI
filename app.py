@@ -660,30 +660,49 @@ def _render_compare_page(papers: list[Paper] | None) -> None:
 def _render_about() -> None:
     st.title("ResearchPilot AI")
     st.markdown(
-        "An AI-powered academic research assistant developed using Python, "
-        "Streamlit, OpenAlex and Google Gemini."
+        '<p class="rp-lead">A study tool for discovering academic papers, '
+        "reading abstracts with Gemini, and exporting the saved results.</p>",
+        unsafe_allow_html=True,
+    )
+    st.subheader("How it works")
+    st.markdown("**Search → Select → Analyse → Compare → Cite → Export**")
+    st.caption(
+        "Search uses the OpenAlex API and does not need a Gemini key. "
+        "Analyse and Compare call the Google Gemini API when GEMINI_API_KEY is configured. "
+        "Citations and Word downloads use results already in the session."
     )
     st.subheader("Features")
     st.markdown(
         "\n".join(
             [
-                "- Academic paper discovery.",
-                "- AI-assisted abstract analysis.",
-                "- Multi-paper comparison.",
-                "- Potential research-gap exploration.",
-                "- Evidence-aware research summaries.",
+                "- OpenAlex academic paper discovery.",
+                "- Gemini-powered abstract analysis.",
+                "- Comparison of 3 to 5 selected papers.",
+                "- APA 7 and general Harvard-style citations.",
+                "- Editable Word report downloads.",
+                "- Dark Streamlit dashboard.",
+                "- Caching and stale-result protection. A saved analysis stays with its paper, "
+                "and a comparison is reused only for the same papers and abstract text.",
+                "- Five analysis attempts and two comparison attempts per browser session.",
             ]
         )
     )
-    st.subheader("Technology")
+    st.subheader("Session limits")
+    st.markdown(
+        "The sidebar counts Gemini attempts for this browser session only. "
+        "A saved success does not use another attempt. "
+        "These limits are not a global quota and they are not billing protection. "
+        "A new session starts the count again."
+    )
+    st.subheader("Limitations")
     st.markdown(
         "\n".join(
             [
-                "- Python",
-                "- Streamlit",
-                "- OpenAlex API",
-                "- Google Gemini API",
-                "- Pytest",
+                "- Analyses are based on available abstracts.",
+                "- AI-generated conclusions require verification against the full papers.",
+                "- Inferred research gaps are not verified literature gaps.",
+                "- Citations may be incomplete when OpenAlex metadata is missing.",
+                "- Word reports repeat a saved result. They are not systematic literature reviews.",
             ]
         )
     )

@@ -552,11 +552,26 @@ def test_navigation_preserves_results_selection_and_analyses():
 
     _goto(app, "About Project")
     about = _markdown(app) + "\n" + "\n".join(item.value for item in app.info)
+    about += "\n" + _captions(app)
     assert "https://github.com/ShivaGoudBongu/ResearchPilot-AI" in about
-    assert "Academic paper discovery." in about
+    assert "OpenAlex academic paper discovery." in about
     assert "OpenAlex API" in about
     assert "Google Gemini API" in about
-    assert "Pytest" in about
+    assert "Gemini-powered abstract analysis." in about
+    assert "Comparison of 3 to 5 selected papers." in about
+    assert "APA 7 and general Harvard-style citations." in about
+    assert "Editable Word report downloads." in about
+    assert "Dark Streamlit dashboard." in about
+    assert "Caching and stale-result protection." in about
+    assert "Five analysis attempts and two comparison attempts per browser session." in about
+    assert "Search → Select → Analyse → Compare → Cite → Export" in about
+    assert "not a global quota" in about
+    assert "not billing protection" in about
+    assert "Analyses are based on available abstracts." in about
+    assert "AI-generated conclusions require verification against the full papers." in about
+    assert "Inferred research gaps are not verified literature gaps." in about
+    assert "Citations may be incomplete when OpenAlex metadata is missing." in about
+    assert "They are not systematic literature reviews." in about
     assert "not a replacement for reading the full scientific papers." in about
     assert "accuracy" not in about.lower()
     assert "%" not in about

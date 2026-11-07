@@ -1,240 +1,168 @@
 # ResearchPilot AI
 
-ResearchPilot searches the public [OpenAlex](https://openalex.org) catalog for scientific papers, analyses one selected abstract with Google Gemini, and compares three to five abstracts to explore author-reported limits and possible research gaps.
+ResearchPilot AI is a portfolio project for discovering academic papers and reading their abstracts with more structure. It searches the public OpenAlex catalog, analyses one abstract with Google Gemini, compares three to five selected abstracts, builds APA 7 and general Harvard citations from the metadata, and downloads those saved results as an editable Word report.
 
-OpenAlex does not require an API key. Gemini reads `GEMINI_API_KEY` from a local `.env` file. That file is gitignored. The key is never written into the source code.
+It is a study tool for a final-year Data Science and AI project. It does not read full papers, and it does not replace a literature review.
 
-## What the app does
+## Features
 
-**Phase 1 — Search.** Enter a research topic. The app asks OpenAlex for up to 10 relevant works and shows each one as an expandable card: title, authors, year, DOI, abstract, and a source link.
+- **OpenAlex paper discovery.** A topic search returns up to 10 works from `https://api.openalex.org/works`. OpenAlex does not require an API key. Each card shows the title, authors, year, DOI, source link, and abstract when OpenAlex provides them. Abstracts are rebuilt from OpenAlex's inverted index.
+- **Single-paper abstract analysis.** **Analyse with AI** sends one title and abstract to Gemini (`gemini-3.5-flash-lite`). The result has Research Objective, Methodology, Key Findings, and Limitations. Limitations separate author-reported limits from AI hypotheses.
+- **Comparison of 3–5 papers.** **Compare Selected Papers** sends one Gemini request for the selected abstracts. The report has six sections: Research Objectives, Methodologies, Key Findings, Author-Reported Limitations, Author-Reported Research Gaps, and AI-Inferred Potential Research Gaps. Papers without an abstract cannot be selected.
+- **APA 7 and general Harvard citations.** Each result has a reference and an in-text citation. Compare Research also builds a reference list for the current selection. Formatting uses OpenAlex metadata only. Missing authors, year, venue, or DOI are flagged and left blank.
+- **Editable Word report export.** A saved analysis or a saved comparison can be downloaded as a `.docx` file. The file is built in memory. The download does not call Gemini, and the document can be edited in Word.
+- **Dark Streamlit dashboard.** The sidebar has four sections: Discover Papers, AI Paper Analysis, Compare Research, and About Project. The dark theme is set in `.streamlit/config.toml` and `researchpilot/theme.py`.
+- **Session-based Gemini limits.** One browser session allows 5 analyses and 2 comparisons. The sidebar shows how many remain. A successful cached result does not use another request. A failed request that was actually sent does. A missing key, a paper with no abstract, and an invalid selection do not.
+- **Caching and stale-result protection.** A saved analysis stays with that paper's OpenAlex id, DOI, or title and year, so it does not move to another card. A comparison is reused only for the same papers and the same abstract text, in any order. A new search clears the selection and drops results that no longer match the current papers.
 
-**Phase 2 — Analyse one paper.** On a card that has an abstract, **Analyse with AI** sends that title and abstract to Gemini once. The result has four sections: Research Objective, Methodology, Key Findings, and Limitations. Limitations separate author-reported limits from AI hypotheses.
+## How It Works
 
-**Phase 3 — Compare 3 to 5 papers.** Each card with an abstract has **Select for comparison**. Papers without an abstract cannot be selected. When 3 to 5 valid papers are selected, **Compare Selected Papers** sends those abstracts in one Gemini request. The report has six sections:
+Search → Select → Analyse → Compare → Cite → Export
 
-1. Research Objectives
-2. Methodologies
-3. Key Findings
-4. Author-Reported Limitations
-5. Author-Reported Research Gaps
-6. AI-Inferred Potential Research Gaps
+1. **Search** on Discover Papers. OpenAlex search works without a Gemini key.
+2. **Select** 3 to 5 papers that have abstracts.
+3. **Analyse** one paper. This calls Gemini and needs `GEMINI_API_KEY`.
+4. **Compare** the current selection. This is a separate Gemini call and needs the same key.
+5. **Cite** from the paper card or the Compare Research reference list. Citations do not call Gemini.
+6. **Export** a Word report from a saved analysis or a saved comparison. Export uses the result already stored in the session.
 
-Author-reported limitations and gaps include only statements the abstracts support. If the abstracts do not state a limitation or a gap, that section says so and does not cite papers for the absence. AI-inferred gaps are hypotheses grounded in the selected abstracts. They are not findings reported by the authors and they are not gaps established across the research literature.
+AI analysis and comparison require a configured Gemini API key. Search, citations, and downloads of results that are already saved do not.
 
-## Architecture
+## Technology Stack
 
+- Python 3.10 or newer (Python 3.12 for Streamlit Community Cloud)
+- Streamlit
+- OpenAlex API
+- Google Gemini API, through `google-genai`
+- `python-docx` for Word reports
+- `requests` for the OpenAlex client
+- `python-dotenv` for a local `.env` file
+- `pytest` for the test suite
+
+## Project Architecture
+
+```text
+app.py                          Streamlit dashboard
+researchpilot/
+  models.py                     Paper record and stable analysis key
+  abstracts.py                  Rebuilds an abstract from an inverted index
+  openalex.py                   Search, parsing, and duplicate handling
+  analyzer.py                   Single-paper Gemini analysis
+  comparison.py                 Selection rules, comparison, and cache identity
+  citations.py                  APA 7 and general Harvard formatting
+  export.py                     In-memory Word reports
+  usage.py                      Per-session Gemini request limits
+  theme.py                      Dashboard CSS
+.streamlit/config.toml          Dark Streamlit theme
+tests/                          Unit and Streamlit tests, with mocked APIs
+requirements.txt
+pytest.ini
 ```
-Research topic
-      │
-      ▼
-Streamlit page (app.py)
-      │
-      ▼
-OpenAlexClient.search_papers()
-      │
-      ▼
-GET https://api.openalex.org/works?search=...&per-page=10
-      │
-      ▼
-parse_work()  +  reconstruct_abstract()
-      │
-      ▼
-Up to 10 expandable paper cards
-      │
-      ├── Analyse with AI  →  analyze_paper()  →  Gemini
-      │
-      └── Select 3 to 5 abstracts
-                │
-                ▼
-          compare_papers()  →  one Gemini request
-                │
-                ▼
-          present_comparison()  →  six labelled sections
-```
 
-The browser page collects a topic and renders expandable cards. It asks Gemini for a single-paper analysis only when you click **Analyse with AI**. It asks Gemini for a comparison only when you click **Compare Selected Papers**. Changing a checkbox does not send a request. Search, parsing, analysis, and comparison live in the `researchpilot` package, so they can be tested without starting Streamlit.
+A paper is identified by its OpenAlex id, then its DOI, then its title and year. Duplicate records that share an OpenAlex id or a DOI are collapsed. Papers that share a title but have different identifiers stay separate.
 
-OpenAlex stores abstracts as an inverted index (`word -> [positions]`), not as a paragraph. `reconstruct_abstract()` puts each word back at its position and joins them in order.
+## Installation
 
-Missing fields stay empty. The page prints **Not available** for a missing author list, year, DOI, abstract, or source URL. A failed request (timeout, no connection, HTTP error, or invalid JSON) is shown as an error. A successful search with zero hits is shown as an empty result, separate from an error.
-
-## Paper identity, selection, and duplicates
-
-Each paper has a stable `analysis_key()`. OpenAlex id is preferred, then DOI, then title and year. Card position is not used, so a saved analysis or comparison cannot appear on a different paper that happens to occupy the same slot.
-
-A comparison requires 3 to 5 papers. Each selected paper must have a non-empty abstract and its own identifier. Two selected papers that share an identifier are rejected. A paper with no abstract shows a notice on that card, `"Title" has no abstract, so it cannot be selected for comparison.`, and has no checkbox.
-
-Search results are collapsed only when two records are the same publication by identifier: the same OpenAlex id, or the same DOI. The first record is kept. Papers that share a title and authors but have different OpenAlex ids, DOIs, and years stay separate, because those can be distinct publications.
-
-## Comparison cache and a new search
-
-A successful comparison is stored with the exact selected papers and a hash of their abstract text. The same set is reused in any order, and returning to an earlier selection shows that saved report without another Gemini request. A different set of papers, or the same papers after an abstract changes, does not show the old report.
-
-A new search clears the checkboxes and hides the current report. Single-paper analyses for papers that are still in the new results are kept. Comparison results whose papers or abstracts are no longer current are dropped.
-
-## API errors and retry
-
-Gemini errors are shown without the API key and without the provider's raw error text. The message distinguishes:
-
-- a missing API key
-- an exhausted quota
-- rate limiting
-- a rejected API key
-- a missing model
-- an invalid or oversized request
-- a timeout
-- a temporary server error
-- a malformed comparison response
-
-A failed comparison stays on the current selection. Click **Compare Selected Papers** again to retry. The app does not retry Gemini in a loop. A successful comparison is not requested again until the selection or the abstract text changes.
-
-## Project layout
-
-| File | Purpose |
-| --- | --- |
-| `app.py` | Streamlit page: search, expandable cards, single-paper analysis, and multi-paper comparison. |
-| `researchpilot/__init__.py` | Package marker and the public names (`Paper`, `OpenAlexClient`, `OpenAlexError`, `analyze_paper`). |
-| `researchpilot/models.py` | `Paper` dataclass: title, authors, year, DOI, abstract, source URL, and a stable `analysis_key()`. |
-| `researchpilot/abstracts.py` | Rebuilds a plain-text abstract from OpenAlex's inverted index. |
-| `researchpilot/openalex.py` | HTTP client, timeouts, error translation, JSON-to-`Paper` parsing, and identifier deduplication. |
-| `researchpilot/analyzer.py` | Single-paper Gemini call, prompt, API error messages, and analysis cache filtering. |
-| `researchpilot/comparison.py` | Selection rules, one comparison request, response validation, display sections, and comparison cache identity. |
-| `tests/test_abstracts.py` | Unit tests for abstract reconstruction. No network. |
-| `tests/test_openalex.py` | Unit tests for parsing, duplicates, and timeout, HTTP, empty, and bad-JSON handling. No network. |
-| `tests/test_analyzer.py` | Unit tests for Gemini analysis with a mocked client. No network and no API key. |
-| `tests/test_comparison.py` | Unit tests for selection, mocked comparison, absence statements, and cache identity. No network. |
-| `tests/test_app.py` | Streamlit checks for analysis, selection, cache reuse, search resets, and retry. No network. |
-| `requirements.txt` | Install list for the app and the tests. |
-| `pytest.ini` | Tells pytest where the tests are and puts the project root on the import path. |
-| `.gitignore` | Keeps the virtual environment, caches, and secret files out of git. |
-| `README.md` | This document. |
-
-## Dependencies
-
-| Package | Used by | Why it is here |
-| --- | --- | --- |
-| `requests` | `researchpilot/openalex.py` | Sends the HTTP GET to OpenAlex and raises clear timeout and connection errors. |
-| `streamlit` | `app.py` | Renders the topic input, Search button, paper cards, analysis, and comparison. |
-| `google-genai` | `researchpilot/analyzer.py` | Calls the Gemini model `gemini-3.5-flash-lite`. Comparison uses the same client. |
-| `python-dotenv` | `researchpilot/analyzer.py` | Loads `GEMINI_API_KEY` from `.env` into the environment. |
-| `pytest` | `tests/` | Runs the unit tests. The running app does not import pytest. |
-
-Python 3.10 or newer is required. These commands were written for Windows PowerShell.
-
-## Setup and run (Windows PowerShell)
-
-From the project folder:
+These steps use Windows PowerShell. Clone the repository, then install the dependencies into a virtual environment.
 
 ```powershell
-Set-Location D:\ResearchPilot-AI
+git clone https://github.com/ShivaGoudBongu/ResearchPilot-AI.git
+Set-Location ResearchPilot-AI
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-python -m pytest
-streamlit run app.py
 ```
 
-If activation is blocked by the execution policy, allow scripts for the current window only and activate again:
+If activation is blocked, allow scripts for the current window and activate again:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-Streamlit opens a local page (usually http://localhost:8501). Type a topic such as `graph neural networks` and click **Search**. Leave the terminal running while you use the page. Stop it with Ctrl+C.
-
-You can run the app without activating the environment:
-
-```powershell
-D:\ResearchPilot-AI\.venv\Scripts\python.exe -m pytest
-D:\ResearchPilot-AI\.venv\Scripts\streamlit.exe run app.py
-```
-
-## Optional contact email
-
-OpenAlex serves anonymous requests. Adding your email puts the app in the [polite pool](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication), which has a higher rate limit. Set it in the shell for the current session. Do not commit it and do not put it in the code.
-
-```powershell
-$env:OPENALEX_MAILTO = "you@university.edu"
-streamlit run app.py
-```
-
-## Gemini API key
-
-Create `.env` in the project folder. Do not commit it.
+Create a file named `.env` in the project folder. Do not commit it. Replace the placeholder with your own key.
 
 ```text
 GEMINI_API_KEY=your-key-here
 ```
 
-Restart the app after changing `.env`. A missing key, a quota limit, a rate limit, or a Gemini server error is shown in the app. The message does not include the key or the provider's raw error text.
+`OPENALEX_MAILTO` is optional. An email address puts OpenAlex requests in the polite pool. It is not an API key.
 
-## What a result contains
+```text
+OPENALEX_MAILTO=you@university.edu
+```
 
-Each result is an expandable card inside its own border. The card title shows the index, title, publication year, and authors. Expand **Abstract, source, and analysis** for the complete details:
+Start the app:
 
-- title
-- authors
-- publication year
-- DOI, when OpenAlex has one
-- abstract, when OpenAlex has an inverted index
-- a source link, chosen in this order: landing page, PDF, open-access URL, DOI, OpenAlex work page
+```powershell
+streamlit run app.py
+```
 
-**View source** opens the original article or publisher page in a new browser tab. Clicking **Analyse with AI** or **Compare Selected Papers** does not redirect away from ResearchPilot.
-
-<img width="960" height="504" alt="image" src="https://github.com/user-attachments/assets/eccbe11a-b76d-4d24-9340-99526dfd6981" />
-
-The search asks for at most 10 works, sorted by OpenAlex relevance for the topic text.
-
-On a paper that has an abstract, **Analyse with AI** asks Gemini for four sections:
-
-1. Research Objective
-2. Methodology
-3. Key Findings
-4. Limitations
-
-Limitations has two parts:
-
-- **Author-reported limitations:** only limits the abstract explicitly states. If none are stated, the analysis says "Not specified in the abstract."
-- **Potential limitations to investigate:** up to three methodological questions grounded in the abstract. These are labeled as AI-generated hypotheses, not established weaknesses or claims made by the authors.
-
-The model uses only the title and abstract. It does not invent datasets, sample sizes, results, or experiments. If the abstract is too thin for a meaningful hypothesis, the analysis says so instead of offering generic criticism. The card shows this disclaimer:
-
-> AI-generated analysis based on the title and abstract only. Verify important claims against the full research paper.
-
-A successful analysis stays on that paper when the card is collapsed or opened again. A new search does not show it under a different paper. A failed analysis can be retried with **Retry analysis**.
-
-Below the cards, a counter shows how many papers are selected. **Compare Selected Papers** is enabled only for 3 to 5 papers with abstracts and distinct identifiers. The report lists each claim with the titles of the papers it cites and states that the claim is AI-generated from the selected abstracts. The comparison always shows this disclaimer, independent of the model text:
-
-> AI-generated comparison based only on the selected titles and abstracts. Verify claims against the full papers. This comparison cannot establish gaps across the entire research literature.
-
-## Research limitations
-
-- Analysis and comparison use titles and abstracts only. They do not read the full papers.
-- AI-generated interpretations need to be checked against the full papers.
-- AI-inferred gaps are hypotheses. They are not proven gaps in the research literature.
-- Gemini availability, quota, and rate limits can block or delay a request. Retry from the button after the message shown in the app.
+Streamlit opens a local page, usually `http://localhost:8501`. Restart the app after you change `.env`.
 
 ## Testing
 
-The project includes automated unit tests using `pytest`.
+From the activated virtual environment:
 
-Tests cover:
+```powershell
+python -m pytest
+```
 
-- Abstract reconstruction from OpenAlex inverted indexes.
-- Paper metadata parsing.
-- HTTP errors, timeouts and connection failures.
-- Invalid JSON responses and empty search results.
-- Keeping distinct papers that share a title, and collapsing records that share an OpenAlex id or DOI.
-- Gemini analysis with a mocked client, including a missing API key, quota, rate limits, authentication failures, and temporary server errors.
-- Keeping an analysis attached to the correct paper after the result order changes.
-- Comparison selection, mocked Gemini comparison, absence statements, cache identity, selection changes, new searches, and retry.
+The same suite can be run without activation:
 
-Run the tests using:
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
 
-<img width="960" height="504" alt="image" src="https://github.com/user-attachments/assets/a3230ae8-e9f0-475f-bf80-19f8c4dae93a" />
+At commit `3f062d9`, this suite passed 88 tests. That number describes that checkpoint. It will change if tests are added or removed.
 
-**Latest verified result:** 65 tests passed.
+The tests mock OpenAlex and Gemini. They do not need a live network connection or a Gemini API key.
 
-The tests use mocked API responses and do not require a live network connection or a Gemini API key.
+## Deployment
+
+Streamlit Community Cloud can run this repository when you are ready to deploy it. A public deployment has not been created yet, so there is no live demo URL.
+
+When you deploy, use these settings:
+
+- Repository: `ShivaGoudBongu/ResearchPilot-AI`
+- Branch: `main`
+- Main file: `app.py`
+- Python version: 3.12
+
+Add secrets as top-level values in the Cloud secrets editor. Streamlit exposes those names as environment variables. The app reads them with `os.getenv`. Use your own key. Do not commit it.
+
+```toml
+GEMINI_API_KEY = "your-key-here"
+OPENALEX_MAILTO = "you@university.edu"
+```
+
+`OPENALEX_MAILTO` is optional. Search still works if `GEMINI_API_KEY` is absent. Analysis and comparison show an error until the key is set.
+
+The session limits in the app apply to one browser session. They reset when that session starts again. On a public app they do not cap the shared Gemini account.
+
+## Limitations
+
+- Gemini analysis and comparison use the title and the available abstract. They do not read the full paper.
+- AI-generated findings need to be checked against the full paper.
+- AI-inferred research gaps are hypotheses from the selected abstracts. They are not verified gaps in the literature.
+- OpenAlex metadata can be incomplete. Missing authors, year, DOI, venue, abstract, or source are shown as unavailable.
+- Citations are generated from that metadata and may need manual verification before use in academic work.
+- Harvard output follows a general variant, not one university's house style.
+- Volume, issue, and page numbers are not requested from OpenAlex, so citations do not include them.
+- A Word report repeats a saved analysis or comparison. It is not a systematic literature review.
+- The 5-analysis and 2-comparison limits belong to one Streamlit session. They are not a global quota and they are not billing protection. A new session starts the count again.
+
+## Security
+
+`GEMINI_API_KEY` and the optional `OPENALEX_MAILTO` value come from environment variables. Locally, `python-dotenv` loads them from `.env`. On Streamlit Community Cloud, the same names can be set as top-level secrets.
+
+`.env` and `.streamlit/secrets.toml` are listed in `.gitignore`. The API key is not written into the source code, error messages, or logs. This is appropriate for a student project. It is not a claim of production-grade security.
+
+## Screenshots
+
+These images show an older version of the interface. They are kept until current screenshots of the dashboard, citations, and Word export are added. They do not show every feature described above.
+
+<img width="960" height="504" alt="Older ResearchPilot search screen, awaiting a current screenshot" src="https://github.com/user-attachments/assets/eccbe11a-b76d-4d24-9340-99526dfd6981" />
+
+<img width="960" height="504" alt="Older ResearchPilot screen, awaiting a current screenshot" src="https://github.com/user-attachments/assets/a3230ae8-e9f0-475f-bf80-19f8c4dae93a" />
