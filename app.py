@@ -1,6 +1,7 @@
 """Streamlit interface for paper discovery, analysis, and comparison."""
 
 import hashlib
+import os
 
 import streamlit as st
 
@@ -34,6 +35,15 @@ from researchpilot.comparison import (
 from researchpilot.models import Paper
 from researchpilot.openalex import OpenAlexClient, OpenAlexError
 from researchpilot.theme import inject_theme
+from researchpilot.usage import (
+    ANALYSIS_REQUEST_LIMIT,
+    COMPARISON_REQUEST_LIMIT,
+    analysis_request_is_outgoing,
+    comparison_request_is_outgoing,
+    record_outgoing_request,
+    remaining_requests,
+    request_allowed,
+)
 
 PAGE_DISCOVER = "Discover Papers"
 PAGE_ANALYSIS = "AI Paper Analysis"
@@ -140,10 +150,23 @@ def _render_stored_analysis(stored: dict) -> None:
         st.error(stored["message"])
 
 
+def _gemini_configured() -> bool:
+    """Return whether a key is present, without storing or displaying it."""
+    value = os.getenv("GEMINI_API_KEY")
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _analyse(paper: Paper) -> None:
     key = paper.analysis_key()
-    if not analysis_needs_request(st.session_state.analyses.get(key)):
+    stored = st.session_state.analyses.get(key)
+    if not analysis_needs_request(stored) or not _has_abstract(paper):
         return
+    if not request_allowed(st.session_state.gemini_analysis_requests, ANALYSIS_REQUEST_LIMIT):
+        return
+    if analysis_request_is_outgoing(stored, True, _gemini_configured()):
+        st.session_state.gemini_analysis_requests = record_outgoing_request(
+            st.session_state.gemini_analysis_requests
+        )
     try:
         text = analyze_paper(title=paper.title, abstract=paper.abstract or "")
     except (ValueError, AnalysisError) as exc:
@@ -215,10 +238,29 @@ def _compare(selected: list[Paper]) -> None:
     cached = _cached_comparison(selected)
     if cached is not None and cached[1].get("status") == "ok":
         return
+    if not request_allowed(st.session_state.gemini_comparison_requests, COMPARISON_REQUEST_LIMIT):
+        return
+    cached_status = None if cached is None else cached[1].get("status")
+    counted = comparison_request_is_outgoing(True, cached_status, _gemini_configured())
+    if counted:
+        st.session_state.gemini_comparison_requests = record_outgoing_request(
+            st.session_state.gemini_comparison_requests
+        )
     try:
         with st.spinner("Comparing the selected abstracts with Gemini..."):
             result = compare_papers(selected)
-    except (SelectionError, ValueError, AnalysisError, ComparisonError) as exc:
+    except SelectionError as exc:
+        if counted:
+            st.session_state.gemini_comparison_requests = max(
+                0, st.session_state.gemini_comparison_requests - 1
+            )
+        st.session_state.comparisons[content_key] = {
+            "status": "error",
+            "message": str(exc),
+            "content_key": content_key,
+        }
+        return
+    except (ValueError, AnalysisError, ComparisonError) as exc:
         st.session_state.comparisons[content_key] = {
             "status": "error",
             "message": str(exc),
@@ -432,11 +474,19 @@ def _render_paper(index: int, paper: Paper, style: str) -> None:
 def _render_analysis_action(index: int, paper: Paper, key: str) -> None:
     stored = st.session_state.analyses.get(key)
     if analysis_needs_request(stored):
+        blocked = not request_allowed(
+            st.session_state.gemini_analysis_requests, ANALYSIS_REQUEST_LIMIT
+        )
         label = "Retry analysis" if stored and stored.get("status") == "error" else "Analyse with AI"
-        if st.button(label, key=f"analyse-{index}-{key}"):
+        if st.button(label, key=f"analyse-{index}-{key}", disabled=blocked):
             with st.spinner("Analysing the abstract with Gemini..."):
                 _analyse(paper)
             stored = st.session_state.analyses.get(key)
+        if blocked:
+            st.caption(
+                "This browser session has used its 5 paper analyses. "
+                "Saved analyses remain available. This is not an account quota."
+            )
     if stored and stored.get("status") == "error":
         st.error(stored.get("message") or "The analysis failed. Please try again.")
     elif stored and stored.get("status") == "ok":
@@ -582,13 +632,28 @@ def _render_compare_page(papers: list[Paper] | None) -> None:
     style = _citation_style()
     _render_reference_list(selected, style)
 
+    served = False
+    found = _cached_comparison(selected)
+    if found is not None and found[1].get("status") == "ok":
+        served = True
+    comparison_blocked = (
+        not served
+        and not selection_errors(selected)
+        and not request_allowed(st.session_state.gemini_comparison_requests, COMPARISON_REQUEST_LIMIT)
+    )
     if st.button(
         "Compare Selected Papers",
         key="compare-selected",
         type="primary",
-        disabled=bool(selection_errors(selected)),
+        disabled=bool(selection_errors(selected)) or comparison_blocked,
     ):
         _compare(selected)
+    if comparison_blocked:
+        st.caption(
+            "This browser session has used its 2 comparisons. "
+            "A saved comparison for the current papers remains available. "
+            "This is not an account quota."
+        )
     _render_comparison(selected, style)
 
 
@@ -658,6 +723,17 @@ def _render_sidebar() -> str:
         st.caption("AI-Powered Research Assistant")
         page = st.radio("Sections", PAGES, key="nav_section")
         st.caption("Built with Python, Streamlit, OpenAlex & Gemini AI.")
+        analyses_left = remaining_requests(
+            st.session_state.gemini_analysis_requests, ANALYSIS_REQUEST_LIMIT
+        )
+        comparisons_left = remaining_requests(
+            st.session_state.gemini_comparison_requests, COMPARISON_REQUEST_LIMIT
+        )
+        st.caption(
+            f"Gemini this session: {analyses_left} of {ANALYSIS_REQUEST_LIMIT} analyses "
+            f"and {comparisons_left} of {COMPARISON_REQUEST_LIMIT} comparisons remaining. "
+            "This limit applies only to this browser session."
+        )
     return page
 
 
@@ -673,6 +749,10 @@ if "comparisons" not in st.session_state:
     st.session_state.comparisons = {}
 if "search_id" not in st.session_state:
     st.session_state.search_id = 0
+if "gemini_analysis_requests" not in st.session_state:
+    st.session_state.gemini_analysis_requests = 0
+if "gemini_comparison_requests" not in st.session_state:
+    st.session_state.gemini_comparison_requests = 0
 
 page = _render_sidebar()
 queued = st.session_state.pop("queued_search", None)

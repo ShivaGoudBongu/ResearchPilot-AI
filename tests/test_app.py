@@ -5,6 +5,7 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+from researchpilot.analyzer import AnalysisError
 from researchpilot.comparison import (
     PRESENTATION_DISCLAIMER,
     ComparisonError,
@@ -641,6 +642,154 @@ def test_word_download_follows_saved_results_and_does_not_call_gemini(monkeypatc
     _goto(compared, "Compare Research")
     assert list(compared.download_button) == []
     assert "Objective claim about the abstracts." not in _markdown(compared)
+
+
+def _gemini_button(app: AppTest, labels: set[str]):
+    return next(button for button in app.button if button.label in labels)
+
+
+def test_session_limits_count_outgoing_gemini_requests_only(monkeypatch):
+    calls = {"analysis": 0, "comparison": 0}
+
+    def fail_analysis(*_args, **_kwargs):
+        calls["analysis"] += 1
+        raise AnalysisError("The analysis request failed. Please try again.")
+
+    def fail_comparison(*_args, **_kwargs):
+        calls["comparison"] += 1
+        raise AnalysisError("The comparison request failed. Please try again.")
+
+    monkeypatch.setenv("GEMINI_API_KEY", "session-limit-test-key")
+    monkeypatch.setattr("researchpilot.analyzer.analyze_paper", fail_analysis)
+    monkeypatch.setattr("researchpilot.comparison.compare_papers", fail_comparison)
+    paper = _paper(
+        "https://openalex.org/W1",
+        "Analysed paper",
+        "This abstract is long enough to analyse.",
+        "https://example/1",
+    )
+    app = _load([paper])
+    for expected in range(1, 6):
+        _gemini_button(app, {"Analyse with AI", "Retry analysis"}).click().run()
+        assert calls["analysis"] == expected
+        assert app.session_state["gemini_analysis_requests"] == expected
+        assert app.session_state["gemini_comparison_requests"] == 0
+    app.run()
+    blocked = _gemini_button(app, {"Analyse with AI", "Retry analysis"})
+    assert blocked.proto.disabled is True
+    assert calls["analysis"] == 5
+    assert "used its 5 paper analyses" in _captions(app)
+    assert "not an account quota" in _captions(app)
+    visible = _markdown(app) + "\n" + _captions(app)
+    assert "session-limit-test-key" not in visible
+    assert any(button.label == "Search" and not button.proto.disabled for button in app.button)
+    assert any(item.label == "Reference" for item in app.text_area)
+    sidebar = "\n".join(item.value for item in app.sidebar.caption)
+    assert "0 of 5 analyses and 2 of 2 comparisons remaining" in sidebar
+    assert "browser session" in sidebar
+
+    saved = _load(
+        [paper],
+        analyses={paper.analysis_key(): {"status": "ok", "text": ANALYSIS}},
+    )
+    saved.session_state["gemini_analysis_requests"] = 5
+    saved.run()
+    assert not any(button.label in {"Analyse with AI", "Retry analysis"} and not button.proto.disabled for button in saved.button)
+    _goto(saved, "AI Paper Analysis")
+    assert "Alpha objective only." in _markdown(saved)
+    assert any(button.label == "Download Word Report" for button in saved.download_button)
+
+    selected = [
+        _paper(
+            f"https://openalex.org/W{index}",
+            f"Paper {index}",
+            f"Abstract {index} is long enough to compare.",
+            f"https://example/{index}",
+        )
+        for index in range(1, 4)
+    ]
+    compared = _load(selected)
+    for box in compared.checkbox:
+        box.check()
+    compared.run()
+    _goto(compared, "Compare Research")
+    for expected in range(1, 3):
+        _compare_button(compared).click().run()
+        assert calls["comparison"] == expected
+        assert compared.session_state["gemini_comparison_requests"] == expected
+        assert compared.session_state["gemini_analysis_requests"] == 0
+    compared.run()
+    assert _compare_button(compared).proto.disabled is True
+    assert calls["comparison"] == 2
+    assert "used its 2 comparisons" in _captions(compared)
+
+    cached = _load(selected, comparisons=_stored_comparison(selected, _comparison_payload(selected)))
+    cached.session_state["gemini_comparison_requests"] = 2
+    for box in cached.checkbox:
+        box.check()
+    cached.run()
+    _goto(cached, "Compare Research")
+    assert "Objective claim about the abstracts." in _markdown(cached)
+    assert calls["comparison"] == 2
+    assert any(button.label == "Download Word Report" for button in cached.download_button)
+
+    short = _load(selected[:2])
+    for box in short.checkbox:
+        box.check()
+    short.run()
+    _goto(short, "Compare Research")
+    assert _compare_button(short).proto.disabled is True
+    assert short.session_state["gemini_comparison_requests"] == 0
+    assert calls["comparison"] == 2
+
+
+def test_successful_analysis_counts_once_and_then_uses_the_cache(monkeypatch):
+    calls = {"analysis": 0}
+
+    def succeed(*_args, **_kwargs):
+        calls["analysis"] += 1
+        return ANALYSIS
+
+    monkeypatch.setenv("GEMINI_API_KEY", "session-limit-test-key")
+    monkeypatch.setattr("researchpilot.analyzer.analyze_paper", succeed)
+    paper = _paper(
+        "https://openalex.org/W1",
+        "Analysed paper",
+        "This abstract is long enough to analyse.",
+        "https://example/1",
+    )
+    app = _load([paper])
+    _gemini_button(app, {"Analyse with AI"}).click().run()
+    app.run()
+
+    assert calls["analysis"] == 1
+    assert app.session_state["gemini_analysis_requests"] == 1
+    assert not any(button.label == "Analyse with AI" for button in app.button)
+    assert "Analysis saved. Open AI Paper Analysis to read it." in _captions(app)
+    assert "session-limit-test-key" not in _markdown(app)
+
+
+def test_missing_api_key_does_not_count_as_a_gemini_request(monkeypatch):
+    calls = {"analysis": 0}
+
+    def missing_key(*_args, **_kwargs):
+        calls["analysis"] += 1
+        raise ValueError("GEMINI_API_KEY is missing. Add it to the .env file and restart the app.")
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr("researchpilot.analyzer.analyze_paper", missing_key)
+    paper = _paper(
+        "https://openalex.org/W1",
+        "Analysed paper",
+        "This abstract is long enough to analyse.",
+        "https://example/1",
+    )
+    app = _load([paper])
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    _gemini_button(app, {"Analyse with AI"}).click().run()
+    assert calls["analysis"] == 1
+    assert app.session_state["gemini_analysis_requests"] == 0
+    assert "GEMINI_API_KEY is missing" in "\n".join(item.value for item in app.error)
 
 
 def test_citation_controls_follow_the_style_and_current_selection(monkeypatch):
