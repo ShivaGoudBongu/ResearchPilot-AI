@@ -1,5 +1,11 @@
 # ResearchPilot AI
 
+**[Live Demo](https://researchpilot-ai-vgzk2abkcvnxokn7exxmdg.streamlit.app)**
+
+The public deployment supports OpenAlex research paper discovery, paper metadata and abstracts, APA 7 and Harvard (general) citations, and reference list generation.
+
+Gemini AI analysis, research comparison, and new AI-generated Word reports are disabled in the public demo. These features remain implemented for local use with an API key.
+
 ResearchPilot AI is a portfolio project for discovering academic papers and reading their abstracts with more structure. It searches the public OpenAlex catalog, analyses one abstract with Google Gemini, compares three to five selected abstracts, builds APA 7 and general Harvard citations from the metadata, and downloads those saved results as an editable Word report.
 
 It is a study tool for a final-year Data Science and AI project. It does not read full papers, and it does not replace a literature review.
@@ -141,7 +147,7 @@ A Word download appears only for an analysis or comparison already saved in the 
 
 ## Deployment
 
-Streamlit Community Cloud can run this repository when you are ready to deploy it. A public deployment has not been created yet, so there is no live demo URL.
+Streamlit Community Cloud runs the public demo at <https://researchpilot-ai-vgzk2abkcvnxokn7exxmdg.streamlit.app>.
 
 When you deploy, use these settings:
 
