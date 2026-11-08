@@ -161,8 +161,26 @@ The session limits in the app apply to one browser session. They reset when that
 
 ## Screenshots
 
-These images show an older version of the interface. They are kept until current screenshots of the dashboard, citations, and Word export are added. They do not show every feature described above.
+### Discover Papers
 
-<img width="960" height="504" alt="Older ResearchPilot search screen, awaiting a current screenshot" src="https://github.com/user-attachments/assets/eccbe11a-b76d-4d24-9340-99526dfd6981" />
+The search page, with a topic field, example searches, and the session limit in the sidebar.
 
-<img width="960" height="504" alt="Older ResearchPilot screen, awaiting a current screenshot" src="https://github.com/user-attachments/assets/a3230ae8-e9f0-475f-bf80-19f8c4dae93a" />
+![Discover Papers search page](docs/screenshots/discover-papers.png)
+
+### AI Paper Analysis
+
+A saved abstract analysis, separating author-reported limitations from AI hypotheses, with a Word report download.
+
+![AI Paper Analysis with a Word download](docs/screenshots/paper-analysis.png)
+
+### Compare Research
+
+Four selected papers, a Harvard (general) reference list built from OpenAlex metadata, and the note that Gemini does not check the citations.
+
+![Compare Research reference list](docs/screenshots/compare-research.png)
+
+### Word report
+
+A downloaded comparison report opened in Microsoft Word, including the disclaimer and the selected papers.
+
+![Comparison report opened in Microsoft Word](docs/screenshots/word-report.png)
