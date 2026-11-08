@@ -6,6 +6,7 @@ import hashlib
 import json
 
 from researchpilot.analyzer import generate_text
+from researchpilot.demo import reject_gemini_in_public_demo
 from researchpilot.models import Paper
 
 MIN_PAPERS = 3
@@ -227,8 +228,10 @@ def compare_papers(papers: list[Paper] | tuple[Paper, ...]) -> dict:
         AnalysisError: the Gemini request failed.
         ComparisonError: the response is malformed, incomplete, or cites an
             unselected paper.
+        PublicDemoError: the public portfolio demo has Gemini disabled.
     """
     validate_selection(papers)
+    reject_gemini_in_public_demo()
     raw_text = generate_text(_comparison_prompt(papers))
     parsed = parse_comparison(raw_text, papers)
     return {

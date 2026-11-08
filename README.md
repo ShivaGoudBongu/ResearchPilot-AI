@@ -119,6 +119,20 @@ At commit `3f062d9`, this suite passed 88 tests. That number describes that chec
 
 The tests mock OpenAlex and Gemini. They do not need a live network connection or a Gemini API key.
 
+## Public demo mode
+
+Set this environment variable for a public Streamlit deployment:
+
+```text
+RESEARCHPILOT_PUBLIC_DEMO=true
+```
+
+Gemini analysis and comparison are unavailable in that mode. The app does not send Gemini requests, and visitors cannot turn Gemini back on. OpenAlex search, paper browsing, citations, reference lists, and navigation keep working. A public demo does not need a Gemini API key.
+
+Leave the variable unset, or set it to `false`, on your own machine. Local Gemini then works with your own `GEMINI_API_KEY`, including the session limits of 5 analyses and 2 comparisons.
+
+A Word download appears only for an analysis or comparison already saved in the current browser session. A fresh public session has no saved AI result, so it does not offer a download.
+
 ## Deployment
 
 Streamlit Community Cloud can run this repository when you are ready to deploy it. A public deployment has not been created yet, so there is no live demo URL.
@@ -130,7 +144,7 @@ When you deploy, use these settings:
 - Main file: `app.py`
 - Python version: 3.12
 
-Add secrets as top-level values in the Cloud secrets editor. Streamlit exposes those names as environment variables. The app reads them with `os.getenv`. Use your own key. Do not commit it.
+For a public demo, set `RESEARCHPILOT_PUBLIC_DEMO = "true"` and do not add a Gemini key. For a private deployment that uses Gemini, add secrets as top-level values in the Cloud secrets editor. Streamlit exposes those names as environment variables. The app reads them with `os.getenv`. Use your own key. Do not commit it.
 
 ```toml
 GEMINI_API_KEY = "your-key-here"

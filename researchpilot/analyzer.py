@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai.errors import APIError, ServerError
 
+from researchpilot.demo import reject_gemini_in_public_demo
 from researchpilot.models import Paper
 
 load_dotenv()
@@ -44,7 +45,9 @@ def analyze_paper(title: str, abstract: str) -> str:
             returned no text.
         AnalysisError: the Gemini request failed, including rate limits and
             temporary server errors.
+        PublicDemoError: the public portfolio demo has Gemini disabled.
     """
+    reject_gemini_in_public_demo()
     require_api_key()
 
     abstract_text = abstract.strip() if isinstance(abstract, str) else ""
@@ -71,7 +74,9 @@ def generate_text(contents: str) -> str:
     Raises:
         ValueError: the API key is missing or the model returned no text.
         AnalysisError: the request failed, including rate limits and server errors.
+        PublicDemoError: the public portfolio demo has Gemini disabled.
     """
+    reject_gemini_in_public_demo()
     client = genai.Client(api_key=require_api_key())
     try:
         response = client.models.generate_content(

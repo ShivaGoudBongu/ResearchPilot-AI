@@ -861,3 +861,99 @@ def test_citation_controls_follow_the_style_and_current_selection(monkeypatch):
     assert "Alpha study" not in visible
     assert "Delta study" not in visible
     assert "Knuth" not in visible
+
+
+def test_public_demo_disables_gemini_actions_and_keeps_search_and_citations(monkeypatch):
+    monkeypatch.setenv("RESEARCHPILOT_PUBLIC_DEMO", "true")
+    monkeypatch.setenv("GEMINI_API_KEY", "demo-must-not-leak")
+
+    def forbid_client(*_args, **_kwargs):
+        raise AssertionError("Gemini client should not be created")
+
+    def fake_search(_self, topic, limit=10):
+        assert topic == "Machine Learning"
+        return [
+            _paper(
+                "https://openalex.org/W9",
+                "Searched paper",
+                "This abstract is long enough to analyse.",
+                "https://example/searched",
+            )
+        ]
+
+    monkeypatch.setattr("researchpilot.analyzer.genai.Client", forbid_client)
+    monkeypatch.setattr("researchpilot.openalex.OpenAlexClient.search_papers", fake_search)
+    app = AppTest.from_file(str(APP), default_timeout=30)
+    app.run()
+    assert not app.exception
+    sidebar = "\n".join(item.value for item in app.sidebar.caption)
+    assert "AI analysis and comparison are disabled in the public portfolio demo." in sidebar
+    assert "of 5 analyses" not in sidebar
+    assert "of 2 comparisons" not in sidebar
+
+    next(button for button in app.button if button.label == "Machine Learning").click().run()
+    assert not app.exception
+    assert "Searched paper" in _markdown(app)
+    analyse = next(button for button in app.button if button.label == "Analyse with AI")
+    assert analyse.proto.disabled is True
+    assert "AI analysis and comparison are disabled in the public portfolio demo." in _captions(app)
+    assert any(item.label == "Reference" for item in app.text_area)
+    assert "demo-must-not-leak" not in _markdown(app) + _captions(app) + sidebar
+
+    for box in app.checkbox:
+        box.check()
+    app.run()
+    _goto(app, "Compare Research")
+    compare = next(button for button in app.button if button.label == "Compare Selected Papers")
+    assert compare.proto.disabled is True
+    assert any(item.label == "References" for item in app.text_area)
+    assert list(app.download_button) == []
+    assert "already saved in this session" in _markdown(app) + "\n" + _captions(app)
+
+
+def test_public_demo_keeps_a_saved_word_report_and_explains_a_fresh_session(monkeypatch):
+    monkeypatch.setenv("RESEARCHPILOT_PUBLIC_DEMO", "true")
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("A saved Word report must not call Gemini.")
+
+    monkeypatch.setattr("researchpilot.analyzer.generate_text", explode)
+    monkeypatch.setattr("researchpilot.comparison.compare_papers", explode)
+    paper = _paper(
+        "https://openalex.org/W1",
+        "Analysed paper",
+        "This abstract is long enough to analyse.",
+        "https://example/1",
+    )
+    saved = _load(
+        [paper],
+        analyses={paper.analysis_key(): {"status": "ok", "text": ANALYSIS}},
+    )
+    _goto(saved, "AI Paper Analysis")
+    assert any(button.label == "Download Word Report" for button in saved.download_button)
+    assert "Alpha objective only." in _markdown(saved)
+
+    fresh = AppTest.from_file(str(APP), default_timeout=30)
+    fresh.run()
+    _goto(fresh, "AI Paper Analysis")
+    assert list(fresh.download_button) == []
+    visible = _markdown(fresh) + "\n" + "\n".join(item.value for item in fresh.info)
+    assert "AI analysis and comparison are disabled in the public portfolio demo." in visible
+    assert "already saved in this session" in visible
+
+
+def test_local_mode_still_shows_the_session_allowance(monkeypatch):
+    monkeypatch.setenv("RESEARCHPILOT_PUBLIC_DEMO", "false")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    paper = _paper(
+        "https://openalex.org/W1",
+        "Analysed paper",
+        "This abstract is long enough to analyse.",
+        "https://example/1",
+    )
+    app = _load([paper])
+    analyse = next(button for button in app.button if button.label == "Analyse with AI")
+    assert analyse.proto.disabled is False
+    sidebar = "\n".join(item.value for item in app.sidebar.caption)
+    assert "5 of 5 analyses and 2 of 2 comparisons remaining" in sidebar
+    assert "public portfolio demo" not in sidebar

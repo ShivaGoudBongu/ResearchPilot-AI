@@ -22,6 +22,7 @@ from researchpilot.export import (
     comparison_docx,
     paper_analysis_docx,
 )
+from researchpilot.demo import PUBLIC_DEMO_MESSAGE, PublicDemoError, public_demo_enabled
 from researchpilot.comparison import (
     PRESENTATION_DISCLAIMER,
     ComparisonError,
@@ -159,6 +160,8 @@ def _gemini_configured() -> bool:
 def _analyse(paper: Paper) -> None:
     key = paper.analysis_key()
     stored = st.session_state.analyses.get(key)
+    if public_demo_enabled():
+        return
     if not analysis_needs_request(stored) or not _has_abstract(paper):
         return
     if not request_allowed(st.session_state.gemini_analysis_requests, ANALYSIS_REQUEST_LIMIT):
@@ -169,7 +172,7 @@ def _analyse(paper: Paper) -> None:
         )
     try:
         text = analyze_paper(title=paper.title, abstract=paper.abstract or "")
-    except (ValueError, AnalysisError) as exc:
+    except (ValueError, AnalysisError, PublicDemoError) as exc:
         st.session_state.analyses[key] = {"status": "error", "message": str(exc)}
         return
     st.session_state.analyses[key] = {"status": "ok", "text": text}
@@ -232,7 +235,7 @@ def _cached_comparison(selected: list[Paper]) -> tuple[str, dict] | None:
 
 
 def _compare(selected: list[Paper]) -> None:
-    if selection_errors(selected):
+    if public_demo_enabled() or selection_errors(selected):
         return
     content_key = comparison_cache_key(selected)
     cached = _cached_comparison(selected)
@@ -260,7 +263,7 @@ def _compare(selected: list[Paper]) -> None:
             "content_key": content_key,
         }
         return
-    except (ValueError, AnalysisError, ComparisonError) as exc:
+    except (ValueError, AnalysisError, ComparisonError, PublicDemoError) as exc:
         st.session_state.comparisons[content_key] = {
             "status": "error",
             "message": str(exc),
@@ -467,14 +470,18 @@ def _render_paper(index: int, paper: Paper, style: str) -> None:
             st.caption(f'"{title}" has no abstract, so it cannot be selected for comparison.')
             _render_source(paper)
             st.button("Analyse with AI", key=f"analyse-{index}-{key}", disabled=True)
-            st.caption("This paper has no abstract, so AI analysis is unavailable.")
+            if public_demo_enabled():
+                st.caption(PUBLIC_DEMO_MESSAGE)
+            else:
+                st.caption("This paper has no abstract, so AI analysis is unavailable.")
         _render_citation(index, paper, style)
 
 
 def _render_analysis_action(index: int, paper: Paper, key: str) -> None:
     stored = st.session_state.analyses.get(key)
     if analysis_needs_request(stored):
-        blocked = not request_allowed(
+        demo = public_demo_enabled()
+        blocked = demo or not request_allowed(
             st.session_state.gemini_analysis_requests, ANALYSIS_REQUEST_LIMIT
         )
         label = "Retry analysis" if stored and stored.get("status") == "error" else "Analyse with AI"
@@ -482,7 +489,9 @@ def _render_analysis_action(index: int, paper: Paper, key: str) -> None:
             with st.spinner("Analysing the abstract with Gemini..."):
                 _analyse(paper)
             stored = st.session_state.analyses.get(key)
-        if blocked:
+        if demo:
+            st.caption(PUBLIC_DEMO_MESSAGE)
+        elif blocked:
             st.caption(
                 "This browser session has used its 5 paper analyses. "
                 "Saved analyses remain available. This is not an account quota."
@@ -575,10 +584,16 @@ def _render_analysis_page(papers: list[Paper] | None) -> None:
         unsafe_allow_html=True,
     )
     if st.session_state.error or not papers:
-        st.info(
-            "Search for papers on Discover Papers, then choose Analyse with AI "
-            "on a paper that has an abstract. The result appears here."
-        )
+        if public_demo_enabled():
+            st.info(
+                f"{PUBLIC_DEMO_MESSAGE} A Word report appears here only for an "
+                "analysis already saved in this session."
+            )
+        else:
+            st.info(
+                "Search for papers on Discover Papers, then choose Analyse with AI "
+                "on a paper that has an abstract. The result appears here."
+            )
         return
 
     shown = False
@@ -599,10 +614,16 @@ def _render_analysis_page(papers: list[Paper] | None) -> None:
             _render_stored_analysis(stored)
             _render_analysis_download(paper, stored, style)
     if not shown:
-        st.info(
-            "No analysis yet. On Discover Papers, choose Analyse with AI "
-            "on a paper that has an abstract."
-        )
+        if public_demo_enabled():
+            st.info(
+                f"{PUBLIC_DEMO_MESSAGE} A Word report appears here only for an "
+                "analysis already saved in this session."
+            )
+        else:
+            st.info(
+                "No analysis yet. On Discover Papers, choose Analyse with AI "
+                "on a paper that has an abstract."
+            )
 
 
 def _render_compare_page(papers: list[Paper] | None) -> None:
@@ -613,10 +634,16 @@ def _render_compare_page(papers: list[Paper] | None) -> None:
         unsafe_allow_html=True,
     )
     if st.session_state.error or not papers:
-        st.info(
-            "Search for papers on Discover Papers, then select 3 to 5 papers "
-            "that include an abstract."
-        )
+        if public_demo_enabled():
+            st.info(
+                f"{PUBLIC_DEMO_MESSAGE} A Word report is available only for a "
+                "comparison already saved in this session."
+            )
+        else:
+            st.info(
+                "Search for papers on Discover Papers, then select 3 to 5 papers "
+                "that include an abstract."
+            )
         return
 
     selected = _selected_papers(papers)
@@ -636,8 +663,10 @@ def _render_compare_page(papers: list[Paper] | None) -> None:
     found = _cached_comparison(selected)
     if found is not None and found[1].get("status") == "ok":
         served = True
+    demo = public_demo_enabled()
     comparison_blocked = (
-        not served
+        not demo
+        and not served
         and not selection_errors(selected)
         and not request_allowed(st.session_state.gemini_comparison_requests, COMPARISON_REQUEST_LIMIT)
     )
@@ -645,10 +674,15 @@ def _render_compare_page(papers: list[Paper] | None) -> None:
         "Compare Selected Papers",
         key="compare-selected",
         type="primary",
-        disabled=bool(selection_errors(selected)) or comparison_blocked,
+        disabled=demo or bool(selection_errors(selected)) or comparison_blocked,
     ):
         _compare(selected)
-    if comparison_blocked:
+    if demo:
+        st.caption(
+            f"{PUBLIC_DEMO_MESSAGE} A Word report is available only for a "
+            "comparison already saved in this session."
+        )
+    elif comparison_blocked:
         st.caption(
             "This browser session has used its 2 comparisons. "
             "A saved comparison for the current papers remains available. "
@@ -742,17 +776,20 @@ def _render_sidebar() -> str:
         st.caption("AI-Powered Research Assistant")
         page = st.radio("Sections", PAGES, key="nav_section")
         st.caption("Built with Python, Streamlit, OpenAlex & Gemini AI.")
-        analyses_left = remaining_requests(
-            st.session_state.gemini_analysis_requests, ANALYSIS_REQUEST_LIMIT
-        )
-        comparisons_left = remaining_requests(
-            st.session_state.gemini_comparison_requests, COMPARISON_REQUEST_LIMIT
-        )
-        st.caption(
-            f"Gemini this session: {analyses_left} of {ANALYSIS_REQUEST_LIMIT} analyses "
-            f"and {comparisons_left} of {COMPARISON_REQUEST_LIMIT} comparisons remaining. "
-            "This limit applies only to this browser session."
-        )
+        if public_demo_enabled():
+            st.caption(PUBLIC_DEMO_MESSAGE)
+        else:
+            analyses_left = remaining_requests(
+                st.session_state.gemini_analysis_requests, ANALYSIS_REQUEST_LIMIT
+            )
+            comparisons_left = remaining_requests(
+                st.session_state.gemini_comparison_requests, COMPARISON_REQUEST_LIMIT
+            )
+            st.caption(
+                f"Gemini this session: {analyses_left} of {ANALYSIS_REQUEST_LIMIT} analyses "
+                f"and {comparisons_left} of {COMPARISON_REQUEST_LIMIT} comparisons remaining. "
+                "This limit applies only to this browser session."
+            )
     return page
 
 
