@@ -121,15 +121,21 @@ The tests mock OpenAlex and Gemini. They do not need a live network connection o
 
 ## Public demo mode
 
-Set this environment variable for a public Streamlit deployment:
+Set this for a public Streamlit deployment. Either source is enough, and a `false` value from the other source does not turn the demo off.
 
 ```text
 RESEARCHPILOT_PUBLIC_DEMO=true
 ```
 
+```toml
+RESEARCHPILOT_PUBLIC_DEMO = true
+```
+
+The environment variable is the string `true`. In Streamlit secrets, unquoted `true` is a boolean. Streamlit copies string secrets into environment variables and leaves booleans in `st.secrets`. The app checks both.
+
 Gemini analysis and comparison are unavailable in that mode. The app does not send Gemini requests, and visitors cannot turn Gemini back on. OpenAlex search, paper browsing, citations, reference lists, and navigation keep working. A public demo does not need a Gemini API key.
 
-Leave the variable unset, or set it to `false`, on your own machine. Local Gemini then works with your own `GEMINI_API_KEY`, including the session limits of 5 analyses and 2 comparisons.
+Leave the variable unset, or set it to `false`, on your own machine, and do not set the secret to true. Local Gemini then works with your own `GEMINI_API_KEY`, including the session limits of 5 analyses and 2 comparisons.
 
 A Word download appears only for an analysis or comparison already saved in the current browser session. A fresh public session has no saved AI result, so it does not offer a download.
 
@@ -144,7 +150,7 @@ When you deploy, use these settings:
 - Main file: `app.py`
 - Python version: 3.12
 
-For a public demo, set `RESEARCHPILOT_PUBLIC_DEMO = "true"` and do not add a Gemini key. For a private deployment that uses Gemini, add secrets as top-level values in the Cloud secrets editor. Streamlit exposes those names as environment variables. The app reads them with `os.getenv`. Use your own key. Do not commit it.
+For a public demo, set `RESEARCHPILOT_PUBLIC_DEMO = true` in the Cloud secrets editor and do not add a Gemini key. For a private deployment that uses Gemini, add the key as a top-level string secret. Use your own key. Do not commit it.
 
 ```toml
 GEMINI_API_KEY = "your-key-here"
