@@ -121,7 +121,7 @@ The same suite can be run without activation:
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-At commit `3f062d9`, this suite passed 88 tests. That number describes that checkpoint. It will change if tests are added or removed.
+At commit `f1245c1`, this suite passed 105 tests. That number describes that checkpoint. It will change if tests are added or removed.
 
 The tests mock OpenAlex and Gemini. They do not need a live network connection or a Gemini API key.
 
